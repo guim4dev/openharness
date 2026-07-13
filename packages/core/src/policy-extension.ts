@@ -63,9 +63,14 @@ export function buildPolicyExtension(
         }
 
         if (decision === "ask") {
-          const approved = ctx.hasUI
-            ? await ctx.ui.confirm("Policy approval", `Allow tool "${event.toolName}" to run?`)
-            : false;
+          let approved = false;
+          if (ctx.hasUI) {
+            try {
+              approved = await ctx.ui.confirm("Policy approval", `Allow tool "${event.toolName}" to run?`);
+            } catch {
+              approved = false; // fail closed if the approval UI itself errors
+            }
+          }
           if (!approved) {
             return {
               block: true,

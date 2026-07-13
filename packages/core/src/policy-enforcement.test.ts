@@ -125,6 +125,30 @@ test("(a) a denied tool is actually blocked — the tool never executes", async 
   expect(events.at(-1)?.type).toBe("done"); // turn still settles
 });
 
+test("(a2) deny-by-default: an unmatched tool is blocked when default is deny", async () => {
+  const record: ToolRecord = { calls: 0, lastArgs: undefined, resultText: "irrelevant" };
+  const policy: Policy = { default: "deny", rules: [] }; // secret_echo matches nothing -> default deny
+
+  const events = await runTurn({ policy, tool: makeStubTool(record), toolArgs: { token: "anything" } });
+
+  expect(record.calls).toBe(0); // unmatched tool blocked by deny-by-default
+  expect(events.at(-1)?.type).toBe("done");
+});
+
+test("(a3) ask fails closed: an ask decision with no interactive UI blocks the tool", async () => {
+  const record: ToolRecord = { calls: 0, lastArgs: undefined, resultText: "irrelevant" };
+  const policy: Policy = {
+    default: "allow",
+    rules: [{ match: "secret_echo", action: "ask" }],
+  };
+
+  // runTurn drives the headless createLiveSession path (no dialog UI), so "ask" must fail closed.
+  const events = await runTurn({ policy, tool: makeStubTool(record), toolArgs: { token: "anything" } });
+
+  expect(record.calls).toBe(0); // no UI -> ask denies rather than allowing
+  expect(events.at(-1)?.type).toBe("done");
+});
+
 test("(b) a secret in tool args is redacted before the tool sees it", async () => {
   const record: ToolRecord = { calls: 0, lastArgs: undefined, resultText: "no secret here" };
   const policy: Policy = {
