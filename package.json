@@ -1,0 +1,20 @@
+{
+  "name": "openharness",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.19.0" },
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.base.json --noEmit",
+    "smoke": "tsx packages/core/src/cli.ts"
+  },
+  "devDependencies": {
+    "typescript": "5.7.2",
+    "vitest": "2.1.8",
+    "tsx": "4.19.2",
+    "@types/node": "22.10.2"
+  }
+}
