@@ -12,6 +12,7 @@
     "@openharness/policy": "0.0.1",
     "@openharness/audit": "0.0.1",
     "@openharness/bundle": "0.0.1",
+    "@openharness/server": "0.0.1",
     "@earendil-works/pi-coding-agent": "0.80.6",
     "@earendil-works/pi-ai": "0.80.6"
   }
