@@ -1,0 +1,8 @@
+{
+  "name": "example",
+  "version": "0.1.0",
+  "branding": { "displayName": "Acme Assistant", "accent": "#4F46E5" },
+  "systemPrompt": "system-prompt.md",
+  "skills": [{ "path": "skills/triage", "mandatory": true }],
+  "providers": { "default": { "provider": "anthropic", "model": "claude-sonnet-5", "credentialProfile": "work" } }
+}

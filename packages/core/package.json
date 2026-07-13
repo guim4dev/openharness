@@ -1,0 +1,12 @@
+{
+  "name": "@openharness/core",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@openharness/definition": "0.0.1",
+    "@openharness/credentials": "0.0.1",
+    "@earendil-works/pi-coding-agent": "0.80.6"
+  }
+}
