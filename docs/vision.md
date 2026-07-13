@@ -81,6 +81,8 @@ rotation). That is the concrete justification for a fork over a pure extension.
 | D4 | **Desktop = real GUI for non-technical users**, driven by the shared core (JSON-RPC/SDK) — not a terminal in a window. TUI and desktop share one core. | "The version with the best experience"; non-technical people must be first-class. Pi's 4 modes make this native. |
 | D5 | **First sub-project = walking skeleton, local-only.** | Proves the spine ("one definition → two frontends") + a daily-use hook, with zero server dependency. De-risks the hardest integration first. |
 | D6 | Project name: **OpenHarness** (`openharness`). | User's choice. |
+| D7 | **Auth is a pluggable `AuthProvider` abstraction** (opencode-style). v0 supports **OpenCode Go** (API key + baseURL) and **ChatGPT/Codex** (OAuth PKCE) from day one; new subscriptions are new plugins. | User wants Codex + OpenCode Go supported first, abstracted so more subscriptions slot in. |
+| D8 | **`chatgpt-oauth` ships as personal BYO-account only, with an explicit ToS disclaimer.** Enterprise-recommended providers: OpenCode Go, Claude Max, API keys. | OpenAI restricts ChatGPT-subscription tokens to "personal development use only; not for commercial/multi-user." Ship it, but honestly. |
 
 ## 5. Governance model (what "not losing control" means)
 
@@ -101,9 +103,12 @@ The control point is a **proxy**, not a spy on the user's machine.
 - **LLM gateway is optional.** Ideally users connect to a provider locally. A
   central gateway (keys, budgets, rate limits) can exist but is not the default —
   consistent with the commoditization bet.
-- **Credentials ≠ API keys.** Users can register consumer subscriptions
-  (ChatGPT/Claude Pro via OAuth), register **multiple accounts**, and the harness
-  **rotates / fails over** across them as limits are hit.
+- **Credentials ≠ API keys.** A pluggable **`AuthProvider`** abstraction (see §10)
+  lets users register API keys, gateway subscriptions (OpenCode Go), and consumer
+  OAuth subscriptions (ChatGPT/Codex, Claude Pro/Max), register **multiple
+  accounts**, and have the harness **rotate / fail over** across them as limits are
+  hit — rotation is orthogonal to credential kind. ChatGPT-subscription auth is
+  personal-BYO-only with a ToS disclaimer (D8).
 - **Strategic wedge**: because every MCP call already flows through our proxy,
   the proxy becomes the natural place to later let users **build automations
   inside the harness and deploy them to our server.**
@@ -176,4 +181,44 @@ enforcement server, SSO, approved-build distribution, packaging pipeline, cloud.
 - How the shared core is exposed to the desktop: **long-lived JSON-RPC daemon vs
   embedded SDK in-process** (skeleton will choose one and document why).
 - Fork sync strategy with upstream Pi (how to stay close to `main`).
-- Consumer-subscription OAuth: legality/ToS considerations per provider.
+- Consumer-subscription OAuth ToS per provider (ChatGPT resolved in D8; Claude
+  Max / others to assess as they're added).
+
+## 10. Subscription-auth landscape (research, 2026-07-13)
+
+How existing tools authenticate to subscriptions — the input to the `AuthProvider`
+abstraction. OpenCode is the reference for the abstraction itself.
+
+- **OpenCode Go** — a low-cost subscription ($5 first month, then $10/mo) for
+  popular open coding models. Auth is a **plain API key** (sign in at OpenCode Zen
+  → subscribe → copy key → paste). Calls route to a gateway
+  `https://opencode.ai/zen/go/v1/{chat/completions,messages}` — **OpenAI- and
+  Anthropic-compatible**. → trivial for us: `api_key` + custom `baseURL`.
+- **OpenCode Zen** — sibling pay-as-you-go gateway for curated models (not a flat
+  subscription). Same API-key + gateway model.
+- **ChatGPT / Codex subscription** — **OAuth PKCE**: local callback (port 1455),
+  client id `app_EMoamEEZ73f0CkXaXp7hrann`, `auth.openai.com/oauth/{authorize,
+  token}`, auto-refresh, creds in `~/.codex/auth.json`; device-code flow for
+  headless. The token calls the **ChatGPT backend** (not the standard OpenAI API):
+  needs an SDK→Codex format transform and a **`store: false`** requirement. ToS:
+  **personal use only, not commercial/multi-user** (see D8).
+- **Claude Pro/Max** — OAuth via browser login (or `claude setup-token` → a
+  1-year `CLAUDE_CODE_OAUTH_TOKEN`). OAuth-subscription credential type.
+- **OpenCode's auth abstraction** (our model): provider-agnostic `Auth` namespace,
+  three credential types (`oauth` {access,refresh,expires,accountId,enterpriseUrl}
+  | `api_key` {key} | well-known), stored in `auth.json` (0600). OAuth/PKCE is
+  **delegated to plugins**, not hardcoded: two-phase `authorize()` → {url,
+  instructions, method} then `callback()` → credential. Model metadata via
+  **models.dev**; calls via the **Vercel AI SDK**; a provider transform layer
+  normalizes messages.
+
+### References
+
+- OpenCode Go — https://opencode.ai/docs/go
+- OpenCode Zen — https://opencode.ai/docs/zen/
+- OpenCode auth/architecture — https://deepwiki.com/sst/opencode/4.2-authentication-and-authorization
+- OpenCode providers — https://opencode.ai/docs/providers/
+- Codex auth — https://learn.chatgpt.com/docs/auth
+- opencode Codex-auth plugin (reference impl) — https://numman-ali.github.io/opencode-openai-codex-auth/
+- Claude Code authentication — https://code.claude.com/docs/en/authentication
+- Pi — https://pi.dev
