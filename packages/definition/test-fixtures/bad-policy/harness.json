@@ -1,0 +1,7 @@
+{
+  "name": "bad-policy",
+  "version": "0.1.0",
+  "branding": { "displayName": "Bad Policy Assistant" },
+  "systemPrompt": "system-prompt.md",
+  "providers": { "default": { "provider": "anthropic", "model": "claude-sonnet-5", "credentialProfile": "work" } }
+}

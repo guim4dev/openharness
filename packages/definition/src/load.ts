@@ -1,5 +1,6 @@
 import { readFile, access } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { parsePolicy, PolicyError } from "@openharness/policy";
 import { harnessManifestSchema } from "./schema.ts";
 import type { HarnessDefinition } from "./types.ts";
 
@@ -43,5 +44,26 @@ export async function loadHarnessDefinition(rootDir: string): Promise<HarnessDef
   }
 
   const iconPath = manifest.branding.icon ? join(root, manifest.branding.icon) : undefined;
-  return { manifest, rootDir: root, systemPromptText, skillDirs, iconPath };
+
+  // Optional policy.json. Absent => no policy (enforcement is a no-op). A present
+  // but malformed file is a hard error: a broken security policy must fail loud,
+  // never be silently ignored.
+  const policyPath = join(root, "policy.json");
+  let policy: HarnessDefinition["policy"];
+  if (await exists(policyPath)) {
+    let rawPolicy: unknown;
+    try {
+      rawPolicy = JSON.parse(await readFile(policyPath, "utf8"));
+    } catch (e) {
+      throw new HarnessDefinitionError(`policy.json is not valid JSON: ${(e as Error).message}`);
+    }
+    try {
+      policy = parsePolicy(rawPolicy);
+    } catch (e) {
+      if (e instanceof PolicyError) throw new HarnessDefinitionError(e.message);
+      throw e;
+    }
+  }
+
+  return { manifest, rootDir: root, systemPromptText, skillDirs, iconPath, policy };
 }

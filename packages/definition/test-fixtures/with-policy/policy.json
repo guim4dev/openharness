@@ -1,0 +1,8 @@
+{
+  "default": "allow",
+  "rules": [
+    { "match": "mcp__*__delete_*", "action": "deny", "reason": "destructive MCP calls are blocked" },
+    { "match": "bash(rm -rf *)", "action": "deny", "reason": "recursive delete is blocked" }
+  ],
+  "redact": [{ "pattern": "sk-LIVE-[A-Za-z0-9]+", "replace": "sk-REDACTED" }]
+}

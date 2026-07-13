@@ -7,12 +7,15 @@ import {
   resolveCliModel,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { AgentSession, InlineExtension, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { loadHarnessDefinition } from "@openharness/definition";
 import type { AuthProviderRegistry, CredentialManager } from "@openharness/credentials";
 import { loadMcpTools } from "@openharness/mcp";
+import { checkModel } from "@openharness/policy";
+import type { Policy } from "@openharness/policy";
 import { createOpenHarnessAuthStorage } from "./pi-auth-storage.ts";
+import { buildPolicyExtension } from "./policy-extension.ts";
 
 /** What a live turn forwards to the caller as it streams. */
 export type LiveSessionEvent =
@@ -38,6 +41,16 @@ export interface CreateLiveSessionOptions {
   agentDir?: string;
   /** Skip extension/context-file discovery for a hermetic session. Default: false. */
   noExtensions?: boolean;
+  /**
+   * Access policy to enforce. When omitted, falls back to the definition's
+   * `policy.json` (if any). When neither is present, enforcement is a no-op.
+   */
+  policy?: Policy;
+  /**
+   * Advanced/test seam: extra Pi tools to expose alongside the harness's MCP
+   * tools (e.g. a stub tool an integration test drives). Merged with MCP tools.
+   */
+  customTools?: ToolDefinition[];
 }
 
 export interface LiveSession {
@@ -84,6 +97,18 @@ export async function createLiveSession(opts: CreateLiveSessionOptions): Promise
   // Seed the runtime credential override before the session's first request.
   await oh.syncActiveProvider(providerId);
 
+  // Resolve the effective policy: an explicit override wins, else the
+  // definition's policy.json. The model gate is enforced HERE (fail-closed): a
+  // denied model refuses to start the session, since the provider-layer hook
+  // cannot block a request.
+  const policy = opts.policy ?? def.policy;
+  if (policy && checkModel(policy, providerId, modelId) === "deny") {
+    throw new Error(`Model '${providerId}/${modelId}' is denied by policy.`);
+  }
+  const policyExtension: InlineExtension[] = policy
+    ? [buildPolicyExtension(policy, { providerId })]
+    : [];
+
   const cwd = opts.cwd ?? process.cwd();
   const agentDir = opts.agentDir ?? getAgentDir();
   const sessionManager = SessionManager.create(cwd);
@@ -97,6 +122,7 @@ export async function createLiveSession(opts: CreateLiveSessionOptions): Promise
     resourceLoaderOptions: {
       systemPrompt: def.systemPromptText,
       additionalSkillPaths: def.skillDirs.map((s) => s.path),
+      ...(policyExtension.length ? { extensionFactories: policyExtension } : {}),
       ...(opts.noExtensions ? { noExtensions: true, noContextFiles: true } : {}),
     },
   });
@@ -124,13 +150,14 @@ export async function createLiveSession(opts: CreateLiveSessionOptions): Promise
   // A mandatory server that fails to connect throws here (fail fast). No `mcp`
   // section => empty tools + no-op dispose, so hermetic harnesses are unaffected.
   const { tools: mcpTools, dispose: disposeMcp } = await loadMcpTools(def);
+  const allTools: ToolDefinition[] = [...mcpTools, ...(opts.customTools ?? [])];
 
   const { session } = await createAgentSessionFromServices({
     services,
     sessionManager,
     model,
     ...(thinkingLevel ? { thinkingLevel } : {}),
-    ...(mcpTools.length ? { customTools: mcpTools } : {}),
+    ...(allTools.length ? { customTools: allTools } : {}),
   });
 
   return {
