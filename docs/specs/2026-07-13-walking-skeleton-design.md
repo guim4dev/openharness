@@ -23,6 +23,17 @@ MCP proxy, central audit, policy-enforcement server, SSO / identity,
 approved-build distribution, packaging/signing pipeline, builder UI, cloud
 version. Consumer-OAuth ToS resolution beyond the personal-use disclaimer below.
 
+## Phasing (this sub-project splits into 4 implementation plans)
+
+Each phase produces working, testable software on its own:
+
+1. **Phase 1 — Headless core** (`docs/superpowers/plans/2026-07-13-walking-skeleton-phase1-core.md`):
+   `definition` + `credentials` (rotation + api-key/OpenCode Go) + `core` (Pi SDK
+   wiring + rotation-retry) + `harnesses/example`, driveable via a smoke CLI.
+2. **Phase 2 — TUI app** (`apps/tui`): branded entry over Pi's `InteractiveMode`.
+3. **Phase 3 — Desktop app** (`apps/desktop`): Tauri + React + Node sidecar (WS).
+4. **Phase 4 — `chatgpt-oauth` provider**: Codex subscription via `registerProvider`.
+
 ## Architecture
 
 `HarnessDefinition` (a directory) → `definition` parses/validates → `core` loads
@@ -52,11 +63,10 @@ credential profile) → two frontends consume the same configured core:
 
 ```
 openharness/
-├─ packages/
-│  ├─ pi/            # vendored fork of earendil-works/pi (MIT); core patched here
+├─ packages/         # (Pi = npm dependency @earendil-works/pi-coding-agent, not vendored — see D-WS1)
 │  ├─ definition/    # HarnessDefinition schema (zod) + loader
 │  ├─ credentials/   # accounts, profiles, rotation/failover, AuthProvider registry
-│  └─ core/          # loads definition, configures Pi, exposes session + `serve`
+│  └─ core/          # loads definition, configures Pi (SDK), exposes session + `serve`
 ├─ apps/
 │  ├─ tui/           # branded entry → core.launchTUI()
 │  └─ desktop/       # Tauri (Rust) + React/Vite web UI over JSON-RPC/WS
@@ -78,22 +88,24 @@ openharness/
 
 ## Components
 
-### `packages/pi` — forked Pi core
+### Pi (npm dependency — no fork in this slice; see D-WS1)
 
-Vendored fork of `earendil-works/pi` (MIT). We keep as much of our behavior as
-possible in Pi packages/extensions and touch core only where required. Two seams
-added to the fork for this slice:
+Pi is `@earendil-works/pi-coding-agent@0.80.6`. Recon (`docs/superpowers/plans/pi-recon.md`)
+confirmed the two seams we need are **public APIs**, so no core edit is required:
 
-1. **`CredentialResolver` injection** — instead of reading a static API key from
-   config/env, Pi asks an injected resolver for the credential at call time and
-   reports each call's outcome (`success` | `rate_limited` | `auth_failed`) so the
-   `credentials` manager can update health and drive rotation + retry.
-2. **Custom-provider / request-transform registration** — lets us register the
-   ChatGPT/Codex subscription backend (non-standard endpoint, `store: false`,
-   SDK→Codex format transform) as a provider Pi can call.
+1. **Credential injection** — `createAgentSession({ authStorage })`; our
+   `AuthStorage` (or a swapped `AuthStorageBackend`) resolves the active account's
+   credential at call time via `getApiKey()`. Rotation observes streamed errors
+   (Pi encodes provider errors into the stream; classify 429/quota/auth via
+   `isRetryableAssistantError` + `normalizeProviderError().status`) and re-issues
+   with the next healthy account.
+2. **Subscription providers** — `pi.registerProvider(name, { baseUrl, oauth: {
+   login, refreshToken, getApiKey }, streamSimple })` via an extension; the
+   `custom-provider-gitlab-duo` example is the template for an OAuth subscription
+   that exchanges a token and delegates to a built-in API impl.
 
-Upstream sync: track `earendil-works/pi` `main`; periodic merge/rebase. Keep the
-two seams small and well-isolated to minimize conflict.
+The vendored fork is deferred to when core edits are actually needed (branding
+polish, a permission system for non-technical users, distribution) — later phases.
 
 ### `packages/definition` — HarnessDefinition
 
@@ -260,16 +272,17 @@ differs.
 
 ## Tech stack
 
-Fork of Pi (TypeScript/Node) vendored in `packages/pi`; `definition` / `core` /
-`credentials` in TypeScript (zod for schemas); TUI in TypeScript; desktop = Tauri
-(Rust shell) + React + Vite web UI; pnpm workspaces; Node built-in test runner (or
-vitest) + Rust tests for the shell.
+Pi as an npm dependency (`@earendil-works/pi-coding-agent@0.80.6`, Node >=22.19.0);
+`definition` / `core` / `credentials` in TypeScript (zod for schemas); TUI in
+TypeScript; desktop = Tauri (Rust shell) + React + Vite web UI; **npm workspaces**
+(matches Pi's world; the earlier pnpm note is superseded); vitest + Rust tests for
+the shell.
 
 ## Decisions log (this slice)
 
 | # | Decision | Rationale |
 |---|----------|-----------|
-| D-WS1 | Vendored fork of Pi in `packages/pi`, not an npm dep. | Only way to add the credential + custom-provider seams; we own the code. |
+| D-WS1 | **REVISED after Pi recon (2026-07-13): Pi consumed as an npm dependency (`@earendil-works/pi-coding-agent@0.80.6`), NOT vendored/forked yet.** | Recon proved every seam we need is a public API — credential injection via `createAgentSession({ authStorage })`, subscription providers via `pi.registerProvider({ oauth, streamSimple })`, prompt/skills/config via flags+env. No core edit required for the skeleton. Upstream auto-closes contributor PRs, so a fork is pure divergence best deferred to when core edits are truly needed (branding polish, permission system, distribution — all deferred non-goals). Reversible anytime. See `docs/superpowers/plans/pi-recon.md`. |
 | D-WS2 | Desktop = Tauri (not Electron); web UI React/Vite. | Lighter, smaller signable binary, cross-platform; React polishes later. |
 | D-WS3 | Desktop↔core = localhost WebSocket + ephemeral token; Node sidecar spawned by Tauri Rust. | Simple for a web UI to consume; keeps Pi core untouched; loopback-only boundary. |
 | D-WS4 | HarnessDefinition = directory + `harness.json` (JSON, zod-validated). | Aligns with Pi's manifest world; zero parser deps; typed single contract. |
