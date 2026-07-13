@@ -1,19 +1,14 @@
 #!/usr/bin/env node
 import { join } from "node:path";
-import {
-  AuthProviderRegistry,
-  CredentialManager,
-  EncryptedFileSecretStore,
-  apiKeyAuthProvider,
-} from "@openharness/credentials";
-import { configDir } from "@openharness/core";
+import { configDir, loadAccounts } from "@openharness/core";
 import { loadHarnessDefinition } from "@openharness/definition";
 import { launchTui } from "./launch.ts";
 
 /**
- * Branded TUI entry: load a HarnessDefinition, resolve credentials from the
- * encrypted on-disk store, and launch Pi's InteractiveMode with the harness's
- * system prompt, mandatory skills, auth seam, and default model already wired.
+ * Branded TUI entry: load a HarnessDefinition, resolve bring-your-own-key
+ * credentials (env keys + configDir()/accounts.json) via loadAccounts, and
+ * launch Pi's InteractiveMode with the harness's system prompt, mandatory
+ * skills, auth seam, and default model already wired.
  */
 async function main(): Promise<void> {
   const [harnessPath] = process.argv.slice(2);
@@ -25,17 +20,11 @@ async function main(): Promise<void> {
   const def = await loadHarnessDefinition(harnessPath);
   const p = def.manifest.providers.default;
 
-  const store = await EncryptedFileSecretStore.open(join(configDir(), "secrets"));
-  const registry = new AuthProviderRegistry();
-  registry.register(apiKeyAuthProvider(store));
-  const manager = new CredentialManager({
-    accounts: [], // account configuration UI lands in a later phase
-    profiles: [{ name: p.credentialProfile, policy: "failover", accountIds: [] }],
-  });
+  const { manager, registry } = await loadAccounts({ profileName: p.credentialProfile });
 
   if (!manager.activeAccount(p.credentialProfile)) {
-    console.log(`${def.manifest.branding.displayName} — no credential accounts configured for profile '${p.credentialProfile}'.`);
-    console.log(`Add an account for provider '${p.provider}' to launch. (Account config UI lands in a later phase.)`);
+    console.log(`${def.manifest.branding.displayName} — no API key configured for provider '${p.provider}' (profile '${p.credentialProfile}').`);
+    console.log(`Bring your own key: export ANTHROPIC_API_KEY=sk-... (or OPENAI_API_KEY, GEMINI_API_KEY, OPENCODE_GO_API_KEY), or add ${join(configDir(), "accounts.json")}.`);
     return;
   }
 

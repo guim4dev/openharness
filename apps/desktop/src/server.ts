@@ -1,10 +1,5 @@
 #!/usr/bin/env node
-import {
-  AuthProviderRegistry,
-  CredentialManager,
-  InMemorySecretStore,
-  apiKeyAuthProvider,
-} from "@openharness/credentials";
+import { loadAccounts } from "@openharness/core";
 import { loadHarnessDefinition } from "@openharness/definition";
 import { startSidecar } from "./sidecar.ts";
 
@@ -20,10 +15,11 @@ import { startSidecar } from "./sidecar.ts";
  *   OH_PROFILE        credential profile to drive (else the harness default)
  *   OH_CWD            working directory for the Pi session (else process.cwd())
  *
- * Credentials: this wires the same in-memory credential seam as the smoke CLI,
- * with no accounts configured. Live model turns need a configured credential
- * account for the harness's provider; without one, a prompt streams back an
- * error frame (surfaced in the UI) rather than tokens.
+ * Credentials: bring-your-own-key via loadAccounts — env keys
+ * (ANTHROPIC_API_KEY etc.) plus configDir()/accounts.json, secrets in the
+ * encrypted on-disk store. With a key configured for the harness's provider,
+ * a prompt streams tokens; without one, the turn streams back an error frame
+ * (surfaced in the UI) rather than tokens.
  */
 async function main(): Promise<void> {
   const harnessPath = process.env.OH_HARNESS_PATH ?? process.argv[2];
@@ -35,13 +31,7 @@ async function main(): Promise<void> {
   const def = await loadHarnessDefinition(harnessPath);
   const profile = process.env.OH_PROFILE ?? def.manifest.providers.default.credentialProfile;
 
-  const store = new InMemorySecretStore();
-  const registry = new AuthProviderRegistry();
-  registry.register(apiKeyAuthProvider(store));
-  const manager = new CredentialManager({
-    accounts: [],
-    profiles: [{ name: profile, policy: "failover", accountIds: [] }],
-  });
+  const { manager, registry } = await loadAccounts({ profileName: profile });
 
   const handle = await startSidecar({
     harnessPath,

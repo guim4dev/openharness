@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "main": "src/index.ts",
+  "bin": { "openharness": "src/chat-cli.ts" },
   "dependencies": {
     "@openharness/definition": "0.0.1",
     "@openharness/credentials": "0.0.1",
