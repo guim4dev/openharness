@@ -1,3 +1,5 @@
+import type { Policy } from "@openharness/policy";
+
 export interface HarnessSkillRef { path: string; mandatory: boolean }
 export interface HarnessProviderConfig { provider: string; model: string; credentialProfile: string }
 export interface HarnessBranding { displayName: string; icon?: string; accent?: string }
@@ -43,4 +45,10 @@ export interface HarnessDefinition {
   systemPromptText: string;
   skillDirs: { path: string; mandatory: boolean }[];
   iconPath?: string;
+  /**
+   * Optional access policy loaded from `policy.json` in the definition dir.
+   * `undefined` when the file is absent (backward compatible — existing harnesses
+   * are unaffected and enforcement is a no-op).
+   */
+  policy?: Policy;
 }

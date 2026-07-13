@@ -1,0 +1,7 @@
+{
+  "name": "with-policy",
+  "version": "0.1.0",
+  "branding": { "displayName": "Policy Assistant" },
+  "systemPrompt": "system-prompt.md",
+  "providers": { "default": { "provider": "anthropic", "model": "claude-sonnet-5", "credentialProfile": "work" } }
+}

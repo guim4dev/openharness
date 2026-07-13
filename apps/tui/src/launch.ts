@@ -10,7 +10,7 @@ import {
   type CreateAgentSessionRuntimeFactory,
   type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
-import { createOpenHarnessAuthStorage } from "@openharness/core";
+import { buildPolicyExtension, checkModel, createOpenHarnessAuthStorage } from "@openharness/core";
 import type { AuthProviderRegistry, CredentialManager } from "@openharness/credentials";
 import { loadHarnessDefinition } from "@openharness/definition";
 import { loadMcpTools } from "@openharness/mcp";
@@ -70,9 +70,21 @@ export async function launchTui(opts: LaunchTuiOptions): Promise<void> {
     },
   };
 
+  // Policy enforcement. The model gate is fail-closed at launch (a denied model
+  // refuses to start); tool_call/tool_result/redaction enforcement rides the
+  // in-process policy extension alongside the rotation hook. Ordering is safe:
+  // rotation only uses before_agent_start; tool_call short-circuits on the first
+  // block regardless of order.
+  if (def.policy && checkModel(def.policy, providerId, def.manifest.providers.default.model) === "deny") {
+    throw new Error(`Model '${providerId}/${def.manifest.providers.default.model}' is denied by policy.`);
+  }
+  const extensionFactories = def.policy
+    ? [rotationExtension, buildPolicyExtension(def.policy, { providerId })]
+    : [rotationExtension];
+
   const config = buildTuiConfig(def, {
     authStorage: oh.authStorage,
-    extensionFactories: [rotationExtension],
+    extensionFactories,
   });
 
   // Seed the runtime override before the first turn.

@@ -1,0 +1,11 @@
+{
+  "default": "allow",
+  "rules": [
+    { "match": "mcp__*__delete_*", "action": "deny", "reason": "Destructive MCP operations are blocked by the example policy." },
+    { "match": "bash(rm -rf *)", "action": "deny", "reason": "Recursive force-delete is blocked by the example policy." }
+  ],
+  "redact": [
+    { "pattern": "sk-LIVE-[A-Za-z0-9]+", "replace": "sk-REDACTED" },
+    { "pattern": "AKIA[0-9A-Z]{16}", "replace": "AKIA****REDACTED" }
+  ]
+}

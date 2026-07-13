@@ -1,5 +1,10 @@
 import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
-import { createAssistantMessageEventStream, fauxAssistantMessage } from "@earendil-works/pi-ai";
+import {
+  createAssistantMessageEventStream,
+  createFauxCore,
+  fauxAssistantMessage,
+  fauxToolCall,
+} from "@earendil-works/pi-ai";
 // AssistantMessageEventStream is re-exported by pi-ai's barrel both as a class
 // value (utils/event-stream) and as a type (types.ts), which is ambiguous under
 // verbatimModuleSyntax. Import the type here and build instances via the
@@ -87,6 +92,67 @@ export function createStubModelRegistry(
   return (authStorage) => {
     const registry = ModelRegistry.inMemory(authStorage);
     registerStubProvider(registry, opts);
+    return registry;
+  };
+}
+
+export interface ToolCallingStubOptions {
+  /** Provider name to register under (must match the harness's provider). */
+  provider: string;
+  /** Model id to register (must match the harness's model). */
+  modelId: string;
+  /** The tool the stub asks the agent to call on the first turn. */
+  toolName: string;
+  /** Arguments the stub passes to that tool call. */
+  toolArgs: Record<string, unknown>;
+  /** Final assistant text streamed after the tool result returns (ends the turn). */
+  finalReply: string;
+  /**
+   * Optional inspector for the context of the SECOND provider call (after the
+   * tool ran). Lets a test assert what the tool result looks like as it
+   * re-enters the model's context — e.g. that a secret was redacted.
+   */
+  onSecondTurnContext?: (context: Context) => void;
+}
+
+/**
+ * A two-step offline stub provider driven by Pi's faux core: the first provider
+ * turn returns a single tool call (`toolName`/`toolArgs`), and the second returns
+ * `finalReply` as text (settling the turn). This exercises the real agent loop's
+ * tool-execution path — beforeToolCall/afterToolCall hooks fire — so a policy
+ * extension can be integration-tested end to end.
+ */
+export function createToolCallingStubModelRegistry(
+  opts: ToolCallingStubOptions,
+): (authStorage: AuthStorage) => ModelRegistry {
+  return (authStorage) => {
+    const registry = ModelRegistry.inMemory(authStorage);
+    const core = createFauxCore({ provider: opts.provider, api: "anthropic-messages" });
+    core.setResponses([
+      fauxAssistantMessage([fauxToolCall(opts.toolName, opts.toolArgs)], { stopReason: "toolUse" }),
+      (context) => {
+        opts.onSecondTurnContext?.(context);
+        return fauxAssistantMessage(opts.finalReply, { stopReason: "stop" });
+      },
+    ]);
+    registry.registerProvider(opts.provider, {
+      baseUrl: "http://stub.local",
+      apiKey: "stub-key",
+      api: "anthropic-messages",
+      streamSimple: core.streamSimple,
+      models: [
+        {
+          id: opts.modelId,
+          name: `${opts.modelId} (tool-calling stub)`,
+          api: "anthropic-messages",
+          reasoning: false,
+          input: ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 200_000,
+          maxTokens: 8192,
+        },
+      ],
+    });
     return registry;
   };
 }

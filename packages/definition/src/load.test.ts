@@ -20,3 +20,21 @@ test("throws a clear error when a mandatory skill dir has no SKILL.md", async ()
   await expect(loadHarnessDefinition(fixture("missing-skill"))).rejects.toThrow(HarnessDefinitionError);
   await expect(loadHarnessDefinition(fixture("missing-skill"))).rejects.toThrow(/SKILL\.md/);
 });
+
+test("loads an optional policy.json into the definition", async () => {
+  const def = await loadHarnessDefinition(fixture("with-policy"));
+  expect(def.policy).toBeDefined();
+  expect(def.policy?.default).toBe("allow");
+  expect(def.policy?.rules).toHaveLength(2);
+  expect(def.policy?.redact?.[0].replace).toBe("sk-REDACTED");
+});
+
+test("policy is undefined when no policy.json is present (backward compatible)", async () => {
+  const def = await loadHarnessDefinition(fixture("valid"));
+  expect(def.policy).toBeUndefined();
+});
+
+test("throws a clear error when policy.json is invalid", async () => {
+  await expect(loadHarnessDefinition(fixture("bad-policy"))).rejects.toThrow(HarnessDefinitionError);
+  await expect(loadHarnessDefinition(fixture("bad-policy"))).rejects.toThrow(/policy/i);
+});
