@@ -14,6 +14,8 @@ import type { AuthProviderRegistry, CredentialManager } from "@openharness/crede
 import { loadMcpTools } from "@openharness/mcp";
 import { checkModel } from "@openharness/policy";
 import type { Policy } from "@openharness/policy";
+import { createFileAuditLog } from "@openharness/audit";
+import type { AuditSink } from "@openharness/audit";
 import { createOpenHarnessAuthStorage } from "./pi-auth-storage.ts";
 import { buildPolicyExtension } from "./policy-extension.ts";
 
@@ -51,6 +53,13 @@ export interface CreateLiveSessionOptions {
    * tools (e.g. a stub tool an integration test drives). Merged with MCP tools.
    */
   customTools?: ToolDefinition[];
+  /**
+   * Where to write the hash-chained audit log. Auditing is OFF unless BOTH a
+   * policy is in effect AND this path is set (opt-in), so existing hermetic
+   * sessions are unaffected. The log records external-call events only (tool
+   * decisions, tool results, provider requests) — never prompt/message content.
+   */
+  auditPath?: string;
 }
 
 export interface LiveSession {
@@ -105,8 +114,12 @@ export async function createLiveSession(opts: CreateLiveSessionOptions): Promise
   if (policy && checkModel(policy, providerId, modelId) === "deny") {
     throw new Error(`Model '${providerId}/${modelId}' is denied by policy.`);
   }
+  // Auditing is opt-in: only when a policy is in effect AND an audit path is
+  // given. Kept off by default so hermetic sessions write nothing.
+  const auditSink: AuditSink | undefined =
+    policy && opts.auditPath ? createFileAuditLog(opts.auditPath) : undefined;
   const policyExtension: InlineExtension[] = policy
-    ? [buildPolicyExtension(policy, { providerId })]
+    ? [buildPolicyExtension(policy, { providerId, ...(auditSink ? { audit: auditSink } : {}) })]
     : [];
 
   const cwd = opts.cwd ?? process.cwd();
@@ -203,6 +216,7 @@ export async function createLiveSession(opts: CreateLiveSessionOptions): Promise
       if (session.isStreaming) await session.abort();
       session.dispose();
       await disposeMcp();
+      await auditSink?.close?.();
     },
   };
 }
