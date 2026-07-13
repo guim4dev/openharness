@@ -1,0 +1,15 @@
+node_modules/
+dist/
+build/
+out/
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# Superpowers working files (plans/scratch) stay local
+docs/superpowers/
+
+# Tauri / desktop build artifacts
+src-tauri/target/
