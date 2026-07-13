@@ -8,6 +8,8 @@
     "skipLibCheck": true,
     "declaration": true,
     "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
     "types": ["node"]
   }
 }

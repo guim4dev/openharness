@@ -7,7 +7,7 @@ const providerConfig = z.object({
   credentialProfile: z.string().min(1),
 });
 
-export const harnessManifestSchema: z.ZodType<HarnessManifest> = z.object({
+export const harnessManifestSchema: z.ZodType<HarnessManifest, z.ZodTypeDef, unknown> = z.object({
   name: z.string().min(1),
   version: z.string().min(1),
   branding: z.object({

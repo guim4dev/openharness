@@ -1,0 +1,17 @@
+{
+  "name": "@openharness/tui",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "bin": { "openharness-tui": "src/cli.ts" },
+  "scripts": {
+    "start": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@openharness/core": "0.0.1",
+    "@openharness/definition": "0.0.1",
+    "@openharness/credentials": "0.0.1",
+    "@earendil-works/pi-coding-agent": "0.80.6"
+  }
+}
