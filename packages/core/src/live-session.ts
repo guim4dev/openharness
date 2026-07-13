@@ -11,6 +11,7 @@ import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { loadHarnessDefinition } from "@openharness/definition";
 import type { AuthProviderRegistry, CredentialManager } from "@openharness/credentials";
+import { loadMcpTools } from "@openharness/mcp";
 import { createOpenHarnessAuthStorage } from "./pi-auth-storage.ts";
 
 /** What a live turn forwards to the caller as it streams. */
@@ -119,11 +120,17 @@ export async function createLiveSession(opts: CreateLiveSessionOptions): Promise
     thinkingLevel = resolved.thinkingLevel;
   }
 
+  // Connect MCP servers declared on the harness and bridge their tools into Pi.
+  // A mandatory server that fails to connect throws here (fail fast). No `mcp`
+  // section => empty tools + no-op dispose, so hermetic harnesses are unaffected.
+  const { tools: mcpTools, dispose: disposeMcp } = await loadMcpTools(def);
+
   const { session } = await createAgentSessionFromServices({
     services,
     sessionManager,
     model,
     ...(thinkingLevel ? { thinkingLevel } : {}),
+    ...(mcpTools.length ? { customTools: mcpTools } : {}),
   });
 
   return {
@@ -168,6 +175,7 @@ export async function createLiveSession(opts: CreateLiveSessionOptions): Promise
     async close() {
       if (session.isStreaming) await session.abort();
       session.dispose();
+      await disposeMcp();
     },
   };
 }

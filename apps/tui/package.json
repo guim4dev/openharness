@@ -12,6 +12,7 @@
     "@openharness/core": "0.0.1",
     "@openharness/definition": "0.0.1",
     "@openharness/credentials": "0.0.1",
+    "@openharness/mcp": "0.0.1",
     "@earendil-works/pi-coding-agent": "0.80.6"
   }
 }

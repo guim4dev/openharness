@@ -25,3 +25,35 @@ test("rejects a bad accent color", () => {
   const bad = { ...valid, branding: { ...valid.branding, accent: "not-a-hex" } };
   expect(() => harnessManifestSchema.parse(bad)).toThrow();
 });
+
+test("accepts an optional mcp section with stdio and http servers", () => {
+  const withMcp = {
+    ...valid,
+    mcp: {
+      servers: {
+        local: { transport: "stdio", command: "my-mcp", args: ["--flag"], env: { TOKEN: "x" }, tools: ["echo"] },
+        remote: { transport: "http", url: "https://mcp.example.com", mandatory: true },
+      },
+    },
+  };
+  const parsed = harnessManifestSchema.parse(withMcp);
+  expect(parsed.mcp?.servers.local.transport).toBe("stdio");
+  expect(parsed.mcp?.servers.local.tools).toEqual(["echo"]);
+  expect(parsed.mcp?.servers.remote.url).toBe("https://mcp.example.com");
+  expect(parsed.mcp?.servers.remote.mandatory).toBe(true);
+});
+
+test("a manifest with no mcp section stays valid (backward compatible)", () => {
+  const parsed = harnessManifestSchema.parse(valid);
+  expect(parsed.mcp).toBeUndefined();
+});
+
+test("rejects an stdio server missing command", () => {
+  const bad = { ...valid, mcp: { servers: { local: { transport: "stdio" } } } };
+  expect(() => harnessManifestSchema.parse(bad)).toThrow(/command/);
+});
+
+test("rejects an http server missing url", () => {
+  const bad = { ...valid, mcp: { servers: { remote: { transport: "http" } } } };
+  expect(() => harnessManifestSchema.parse(bad)).toThrow(/url/);
+});

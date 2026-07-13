@@ -13,6 +13,7 @@ import {
 import { createOpenHarnessAuthStorage } from "@openharness/core";
 import type { AuthProviderRegistry, CredentialManager } from "@openharness/credentials";
 import { loadHarnessDefinition } from "@openharness/definition";
+import { loadMcpTools } from "@openharness/mcp";
 import { buildTuiConfig } from "./build-options.ts";
 
 export interface LaunchTuiOptions {
@@ -77,6 +78,13 @@ export async function launchTui(opts: LaunchTuiOptions): Promise<void> {
   // Seed the runtime override before the first turn.
   await oh.syncActiveProvider(config.providerId);
 
+  // Connect MCP servers declared on the harness and bridge their tools. These
+  // cannot ride on buildTuiConfig's servicesOptions (that slice of
+  // CreateAgentSessionServicesOptions has no tools field) — customTools lives on
+  // createAgentSessionFromServices, so we build them here and thread them into
+  // the runtime factory below. A mandatory server that fails to connect throws.
+  const { tools: mcpTools, dispose: disposeMcp } = await loadMcpTools(def);
+
   const cwd = opts.cwd ?? process.cwd();
   const agentDir = getAgentDir();
   const sessionManager = SessionManager.create(cwd);
@@ -115,6 +123,7 @@ export async function launchTui(opts: LaunchTuiOptions): Promise<void> {
       sessionStartEvent,
       model: resolved.model,
       thinkingLevel: resolved.thinkingLevel,
+      ...(mcpTools.length ? { customTools: mcpTools } : {}),
     });
 
     return { ...created, services, diagnostics };
@@ -126,5 +135,9 @@ export async function launchTui(opts: LaunchTuiOptions): Promise<void> {
     ...config.interactiveOptions,
     modelFallbackMessage: runtime.modelFallbackMessage,
   });
-  await tui.run();
+  try {
+    await tui.run();
+  } finally {
+    await disposeMcp();
+  }
 }

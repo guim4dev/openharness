@@ -1,0 +1,12 @@
+{
+  "name": "@openharness/mcp",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@openharness/definition": "0.0.1",
+    "@earendil-works/pi-coding-agent": "0.80.6"
+  }
+}
