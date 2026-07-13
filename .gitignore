@@ -13,3 +13,6 @@ docs/superpowers/
 
 # Tauri / desktop build artifacts
 src-tauri/target/
+
+# Vite frontend build output
+dist-ui/
