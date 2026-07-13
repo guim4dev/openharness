@@ -83,6 +83,7 @@ rotation). That is the concrete justification for a fork over a pure extension.
 | D6 | Project name: **OpenHarness** (`openharness`). | User's choice. |
 | D7 | **Auth is a pluggable `AuthProvider` abstraction** (opencode-style). v0 supports **OpenCode Go** (API key + baseURL) and **ChatGPT/Codex** (OAuth PKCE) from day one; new subscriptions are new plugins. | User wants Codex + OpenCode Go supported first, abstracted so more subscriptions slot in. |
 | D8 | **`chatgpt-oauth` ships as personal BYO-account only, with an explicit ToS disclaimer.** Enterprise-recommended providers: OpenCode Go, Claude Max, API keys. | OpenAI restricts ChatGPT-subscription tokens to "personal development use only; not for commercial/multi-user." Ship it, but honestly. |
+| D9 | **OpenHarness *is the harness* — NOT a meta-harness.** We build on/extend Pi to BE one company-brandable, self-hosted, distributable harness that a company creates and deploys to its own employees. We do NOT orchestrate multiple harnesses underneath, and we do NOT layer on top of a meta-harness (e.g. Omnigent — see §11). ("Meta-layer over Pi" in D1 means we extend Pi to be a harness, not that we orchestrate many.) | The value is in *being* the harness employees use — branded, governed, distributed — one layer below the meta-harness category. A layer above the meta layer would be redundant. Validates the Pi-based build. |
 
 ## 5. Governance model (what "not losing control" means)
 
@@ -222,3 +223,42 @@ abstraction. OpenCode is the reference for the abstraction itself.
 - opencode Codex-auth plugin (reference impl) — https://numman-ali.github.io/opencode-openai-codex-auth/
 - Claude Code authentication — https://code.claude.com/docs/en/authentication
 - Pi — https://pi.dev
+
+## 11. Related work: Omnigent — and why we're a different category (2026-07-13)
+
+[Omnigent](https://omnigent.ai) (Databricks + Neon, Apache-2.0, **Python 3.12+**,
+GitHub `omnigent-ai/omnigent`, alpha) is a **meta-harness**: a control plane that
+**orchestrates many harnesses** — Claude Code, Codex, Cursor, OpenCode, Hermes,
+**Pi**, and custom YAML agents — with meta-layer policies (stateful, 3-level:
+server/agent/session; cost budgets; OS sandboxing), live shared sessions, and
+surfaces over terminal + web + macOS native + mobile + REST.
+
+**Category difference (the key point).** Omnigent sits *above* many harnesses.
+OpenHarness *is* one harness (built on Pi) that a company brands and ships to its
+employees — one layer *below* Omnigent's category. We are not competing for the
+same slot; an OpenHarness-built harness could itself be a target Omnigent wraps.
+We do **not** fork Omnigent, sit on top of it, or become a meta-harness (D9).
+
+**Where we differ / our moat:**
+- **A brandable, distributable harness *product*** (own TUI + desktop, mandatory
+  skills/MCPs, curated prompt library, self-hosted) — Omnigent runs YAML agents on
+  *its* platform; white-label distribution isn't its focus.
+- **Credential pooling + multi-account rotation/failover** — Omnigent supports
+  subscriptions (via the official `claude`/`codex` CLIs) but not multi-account
+  rotation for one provider. We built this in Phase 1.
+- **Cross-platform native desktop for non-technical users** — Omnigent's desktop is
+  a macOS-only web wrapper; ours targets Windows/Linux/macOS natively.
+
+**What to borrow (ideas, not architecture):**
+- Their **policy model** (stateful, data-centric, enforced at the layer not via
+  prompts, 3-level stacking) — a strong reference for our future control plane.
+- **Subscription auth via the official `claude`/`codex` CLIs** — a possibly
+  simpler/safer (ToS) alternative to raw OAuth PKCE for the personal-subscription
+  path.
+- **Declarative agent config** (their `config.yaml`) validates our `harness.json`.
+
+### References (Omnigent)
+
+- Site — https://omnigent.ai · Custom agents — https://omnigent.ai/docs/use/custom-agents
+- GitHub — https://github.com/omnigent-ai/omnigent
+- Databricks blog — https://www.databricks.com/blog/introducing-omnigent-meta-harness-combine-control-and-share-your-agents
