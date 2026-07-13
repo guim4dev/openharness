@@ -8,6 +8,7 @@ import {
   verifyBundle,
   writeBundle,
 } from "@openharness/bundle";
+import { createOpenHarnessServer } from "@openharness/server";
 import { runChat } from "./chat.ts";
 
 /** Value that follows a `--flag` token in argv, or undefined. */
@@ -101,6 +102,37 @@ async function main(): Promise<void> {
       `wrote bundle ${out}: ${bundle.manifest.name}@${bundle.manifest.version}, ${Object.keys(bundle.manifest.files).length} files\n`,
     );
     process.exit(0);
+  }
+
+  // `openharness serve --bundles <dir> --audit <dir> [--host H] [--port N]` —
+  // the thin bundle host + audit sink (DP5). Token comes from env, never argv.
+  if (args[0] === "serve") {
+    const bundlesDir = flag(args, "--bundles");
+    const auditDir = flag(args, "--audit");
+    const host = flag(args, "--host");
+    const portArg = flag(args, "--port");
+    if (!bundlesDir || !auditDir) {
+      process.stderr.write(
+        "usage: openharness serve --bundles <dir> --audit <dir> [--host H] [--port N]\n",
+      );
+      process.exit(2);
+    }
+    const token = process.env.OPENHARNESS_SERVER_TOKEN;
+    const server = createOpenHarnessServer({
+      bundlesDir,
+      auditDir,
+      token,
+      host,
+      port: portArg ? Number.parseInt(portArg, 10) : undefined,
+    });
+    const { url } = await server.start();
+    process.stdout.write(`openharness server listening at ${url}\n`);
+    process.stdout.write(
+      `boundary: binds to ${host ?? "127.0.0.1"} only; ${
+        token ? "token-gated (Bearer) on /bundle and /audit" : "NO TOKEN SET — /bundle and /audit are open to anyone reaching this host"
+      }; no SSO, no org model.\n`,
+    );
+    return;
   }
 
   if (args[0] === "chat") args.shift();
