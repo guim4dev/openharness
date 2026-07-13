@@ -1,0 +1,37 @@
+{
+  "name": "@openharness/desktop",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "sidecar": "tsx src/server.ts",
+    "build:ui": "vite build",
+    "dev:ui": "vite",
+    "tauri": "tauri",
+    "dev:desktop": "tauri dev",
+    "build:desktop": "tauri build"
+  },
+  "dependencies": {
+    "@openharness/core": "0.0.1",
+    "@openharness/definition": "0.0.1",
+    "@openharness/credentials": "0.0.1",
+    "@earendil-works/pi-coding-agent": "0.80.6",
+    "ws": "8.21.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/api": "2.11.1",
+    "@tauri-apps/cli": "2.11.4",
+    "@testing-library/react": "14.3.1",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "@types/ws": "8.5.13",
+    "@vitejs/plugin-react": "4.3.4",
+    "jsdom": "25.0.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "typescript": "5.7.2",
+    "vite": "5.4.21",
+    "vitest": "2.1.8"
+  }
+}

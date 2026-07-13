@@ -11,5 +11,6 @@
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "types": ["node"]
-  }
+  },
+  "exclude": ["node_modules", "apps/desktop/ui", "apps/desktop/dist-ui"]
 }
