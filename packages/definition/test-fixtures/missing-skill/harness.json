@@ -1,0 +1,8 @@
+{
+  "name": "missing-skill",
+  "version": "0.1.0",
+  "branding": { "displayName": "Broken", "accent": "#000000" },
+  "systemPrompt": "system-prompt.md",
+  "skills": [{ "path": "skills/nope", "mandatory": true }],
+  "providers": { "default": { "provider": "anthropic", "model": "claude-sonnet-5", "credentialProfile": "work" } }
+}
