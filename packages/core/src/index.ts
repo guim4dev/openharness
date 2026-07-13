@@ -9,6 +9,8 @@ export { buildPolicyExtension } from "./policy-extension.ts";
 export type { PolicyExtensionOptions } from "./policy-extension.ts";
 export { checkModel } from "@openharness/policy";
 export type { Policy } from "@openharness/policy";
+export { createFileAuditLog, verifyAuditLog, InMemoryAuditSink, hashCanonical, AUDIT_GENESIS } from "@openharness/audit";
+export type { AuditSink, AuditEntry, AuditRecord, ToolDecision, VerifyResult } from "@openharness/audit";
 export { loadAccounts } from "./accounts.ts";
 export type { LoadAccountsOptions, LoadedAccounts } from "./accounts.ts";
 export { runChat } from "./chat.ts";

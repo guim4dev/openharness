@@ -1,6 +1,8 @@
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
-import { applyRedactors, checkModel, compileRedactors, decideTool } from "@openharness/policy";
+import { applyRedactors, checkModel, compileRedactors, decideTool, matchToolIdentity } from "@openharness/policy";
 import type { CompiledRedactor, Policy } from "@openharness/policy";
+import { hashCanonical } from "@openharness/audit";
+import type { AuditSink, ToolDecision } from "@openharness/audit";
 
 export interface PolicyExtensionOptions {
   /**
@@ -12,6 +14,33 @@ export interface PolicyExtensionOptions {
   providerId?: string;
   /** Where the model-denial warning goes. Default: console.error. */
   logger?: (message: string) => void;
+  /**
+   * Optional audit sink. When present, every tool decision, tool result, and
+   * provider request is recorded as an external-call event. The audit log NEVER
+   * carries raw args, results, or prompt/message content — only fingerprints
+   * (SHA-256 over redacted payloads) and non-sensitive metadata.
+   */
+  audit?: AuditSink;
+}
+
+/** `mcp__<server>__<tool>` -> `<server>`; undefined for non-MCP tools. */
+function parseMcpServer(toolName: string): string | undefined {
+  if (!toolName.startsWith("mcp__")) return undefined;
+  const rest = toolName.slice("mcp__".length);
+  const idx = rest.indexOf("__");
+  return idx > 0 ? rest.slice(0, idx) : undefined;
+}
+
+/** The `match` pattern of the first rule that matches, or undefined (default decided). */
+function matchedRuleId(policy: Policy, toolName: string, args: unknown): string | undefined {
+  for (const rule of policy.rules) {
+    if (matchToolIdentity(rule.match, toolName, args)) return rule.match;
+  }
+  return undefined;
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 /**
@@ -44,6 +73,7 @@ export function buildPolicyExtension(
   const redactors: CompiledRedactor[] = compileRedactors(policy);
   const log = opts.logger ?? ((m: string) => console.error(m));
   const providerId = opts.providerId;
+  const audit = opts.audit;
 
   function redactInPlace(input: Record<string, unknown>): void {
     if (redactors.length === 0) return;
@@ -58,7 +88,26 @@ export function buildPolicyExtension(
       pi.on("tool_call", async (event, ctx) => {
         const { decision, reason } = decideTool(policy, event.toolName, event.input);
 
+        // Fingerprint the REDACTED args (never the raw args) so a secret in an
+        // argument can never be recovered from the audit log — recorded even for
+        // denials, which block before the tool ever runs.
+        const server = parseMcpServer(event.toolName);
+        const ruleId = matchedRuleId(policy, event.toolName, event.input);
+        const recordDecision = (auditDecision: ToolDecision): void => {
+          audit?.record({
+            type: "tool_call",
+            tool: event.toolName,
+            ...(server ? { server } : {}),
+            decision: auditDecision,
+            ...(ruleId ? { ruleId } : {}),
+            argsHash: hashCanonical(
+              redactors.length ? applyRedactors(redactors, event.input) : event.input,
+            ),
+          });
+        };
+
         if (decision === "deny") {
+          recordDecision("deny");
           return { block: true, reason: reason ?? `Blocked by policy: tool "${event.toolName}" is denied.` };
         }
 
@@ -72,6 +121,7 @@ export function buildPolicyExtension(
             }
           }
           if (!approved) {
+            recordDecision("ask-denied");
             return {
               block: true,
               reason:
@@ -79,30 +129,71 @@ export function buildPolicyExtension(
                 `Denied by policy: tool "${event.toolName}" requires interactive approval and none was granted.`,
             };
           }
+          // approved ask: redact args before the tool executes, then record.
+          redactInPlace(event.input as Record<string, unknown>);
+          recordDecision("ask-approved");
+          return undefined;
         }
 
-        // allow (or approved ask): redact args before the tool executes.
+        // allow: redact args before the tool executes, then record.
         redactInPlace(event.input as Record<string, unknown>);
+        recordDecision("allow");
         return undefined;
       });
 
       pi.on("tool_result", async (event) => {
-        if (redactors.length === 0) return undefined;
-        return {
-          content: applyRedactors(redactors, event.content),
-          details: applyRedactors(redactors, event.details),
-        };
+        const hasRedactors = redactors.length > 0;
+        const content = hasRedactors ? applyRedactors(redactors, event.content) : event.content;
+        const details = hasRedactors ? applyRedactors(redactors, event.details) : event.details;
+
+        if (audit) {
+          const changed =
+            hasRedactors &&
+            (hashCanonical(event.content) !== hashCanonical(content) ||
+              hashCanonical(event.details) !== hashCanonical(details));
+          // Fingerprint the REDACTED result — never the raw content/details.
+          audit.record({
+            type: "tool_result",
+            tool: event.toolName,
+            redacted: changed,
+            resultHash: hashCanonical({ content, details }),
+          });
+        }
+
+        if (!hasRedactors) return undefined;
+        return { content, details };
       });
 
-      if (providerId && policy.models) {
+      // A `before_provider_request` handler is needed when either the audit sink
+      // wants a model_request record OR the model-denial warning is armed.
+      if (audit || (providerId && policy.models)) {
         pi.on("before_provider_request", async (event, ctx) => {
-          const payload = event.payload as { model?: unknown } | null | undefined;
+          const payload = event.payload as
+            | { model?: unknown; usage?: { input_tokens?: unknown; output_tokens?: unknown } }
+            | null
+            | undefined;
           const model = typeof payload?.model === "string" ? payload.model : undefined;
-          if (model && checkModel(policy, providerId, model) === "deny") {
+
+          if (providerId && policy.models && model && checkModel(policy, providerId, model) === "deny") {
             const message = `[openharness/policy] model "${providerId}/${model}" is denied by policy but cannot be blocked at the provider layer; the model gate is enforced at session creation.`;
             if (ctx.hasUI) ctx.ui.notify(message, "warning");
             else log(message);
           }
+
+          if (audit) {
+            // Record ONLY provider/model + token counts — never the payload's
+            // messages/prompt content.
+            const tokensIn = finiteNumber(payload?.usage?.input_tokens);
+            const tokensOut = finiteNumber(payload?.usage?.output_tokens);
+            audit.record({
+              type: "model_request",
+              provider: providerId ?? "unknown",
+              model: model ?? "unknown",
+              ...(tokensIn !== undefined ? { tokensIn } : {}),
+              ...(tokensOut !== undefined ? { tokensOut } : {}),
+            });
+          }
+
           return event.payload;
         });
       }
