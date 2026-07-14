@@ -1,0 +1,8 @@
+{
+  "name": "with-library-unknown-name",
+  "version": "0.1.0",
+  "branding": { "displayName": "Unknown Name Assistant" },
+  "promptLibrary": "prompts",
+  "systemPrompt": "lib:does-not-exist",
+  "providers": { "default": { "provider": "anthropic", "model": "claude-sonnet-5", "credentialProfile": "work" } }
+}

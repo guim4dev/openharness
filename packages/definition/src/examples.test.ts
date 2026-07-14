@@ -19,6 +19,17 @@ test("acme-fintech loads cleanly: branding, mandatory skill, two non-mandatory M
   expect(def.manifest.branding.accent).toBe("#0E7C61");
   expect(def.systemPromptText).toContain("Acme Engineer");
 
+  // systemPrompt is a `lib:<name>` ref resolved against promptLibrary (curated,
+  // shared base) and appendSystemPrompt layers Acme-specific text on top — the
+  // composed systemPromptText carries content from BOTH, base before append.
+  expect(def.manifest.promptLibrary).toBe("prompts");
+  expect(def.manifest.systemPrompt).toBe("lib:platform-eng-base");
+  expect(def.systemPromptText).toContain("blast radius"); // from the curated base prompt
+  expect(def.systemPromptText).toContain("money-moving infrastructure"); // from appendSystemPrompt
+  expect(def.systemPromptText.indexOf("blast radius")).toBeLessThan(
+    def.systemPromptText.indexOf("money-moving infrastructure"),
+  );
+
   expect(def.skillDirs).toHaveLength(1);
   expect(def.skillDirs[0].mandatory).toBe(true);
   expect(def.skillDirs[0].path.endsWith(join("skills", "incident-triage"))).toBe(true);

@@ -17,7 +17,12 @@ audit-integrity framing + server-side chain verification, policy fails loud on a
 malformed rule, constant-time token). Packages/apps:
 
 - **`@openharness/definition`** — HarnessDefinition (dir + `harness.json` + optional
-  `policy.json` + `mcp` section), zod-validated, fail-fast loader.
+  `policy.json` + `mcp` section), zod-validated, fail-fast loader. `systemPrompt`/
+  `appendSystemPrompt` accept a plain file path (default) or a `lib:<name>` ref
+  resolved against an optional `promptLibrary` dir — see `@openharness/prompts`.
+- **`@openharness/prompts`** — a curated PromptLibrary: a dir of `.md` files with
+  YAML frontmatter `{ name, description }`; `loadPromptLibrary` + `resolvePrompt`
+  (throws, listing available names, on an unknown ref).
 - **`@openharness/credentials`** — encrypted secret store, multi-account rotation/
   failover, pluggable AuthProvider registry, api-key provider (covers OpenCode Go).
 - **`@openharness/core`** — cross-platform per-identifier paths, `createLiveSession`
@@ -144,7 +149,15 @@ The control point is a **proxy**, not a spy on the user's machine.
   secret redaction, command allowlists — the org defines, the harness applies.
 - **Mandatory MCPs and mandatory skills**: an org can require certain MCP servers
   to always be connected and certain skills to always be present.
-- **System-prompt control + a shared prompt library** the org curates.
+- **System-prompt control + a shared prompt library** the org curates. **Implemented:**
+  a `promptLibrary` dir of named, frontmatter-tagged `.md` prompts; a definition
+  references one by name (`systemPrompt: "lib:<name>"`, optionally layering
+  org-specifics via `appendSystemPrompt`) instead of inlining the text — the
+  prompt layer is centrally curated and swappable without touching the harness
+  that consumes it. `harnesses/acme-fintech` demonstrates it (base + append);
+  `harnesses/example` / `harnesses/northwind-ops` keep the plain-path form
+  working unchanged. The library must live inside the definition dir to travel
+  in the signed bundle (`@openharness/bundle` only walks the definition root).
 - **Distribution / identity**: only approved builds run; SSO decides who uses
   which harness; centralized update/rollback of shipped TUI + desktop versions.
 - **LLM gateway is optional.** Ideally users connect to a provider locally. A
