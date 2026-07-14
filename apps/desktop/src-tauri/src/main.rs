@@ -36,9 +36,16 @@ fn repo_root() -> PathBuf {
 /// (not a shell shim), so no `cmd /C` / `.cmd` handling is needed. A `.ts`
 /// entry is run through the `tsx` loader (dev); a prebuilt `.mjs`/`.js` runs on
 /// bare `node`. Overridable via env for packaging experiments:
-///   OH_SIDECAR_ENTRY  path to the sidecar entry (default: apps/desktop/src/server.ts)
-///   OH_HARNESS_PATH   harness definition dir the sidecar loads (default: harnesses/example)
-fn spawn_sidecar() -> std::io::Result<Child> {
+///   OH_SIDECAR_ENTRY    path to the sidecar entry (default: apps/desktop/src/server.ts)
+///   OH_HARNESS_PATH     harness definition dir the sidecar loads (default: harnesses/example)
+///   OPENHARNESS_APP_ID  app id the sidecar namespaces its config dir under (default:
+///                       `app_id`, this build's Tauri `identifier` from tauri.conf.json).
+///                       Manual override is for advanced/test use only — a normal build
+///                       should rely on the Tauri identifier so branded builds (each with
+///                       their own templated identifier) get isolated config dirs instead
+///                       of falling back to the shared default (see
+///                       `packages/core/src/paths.ts::configDir`).
+fn spawn_sidecar(app_id: &str) -> std::io::Result<Child> {
     let root = repo_root();
     let entry = std::env::var("OH_SIDECAR_ENTRY")
         .map(PathBuf::from)
@@ -59,6 +66,14 @@ fn spawn_sidecar() -> std::io::Result<Child> {
 
     if std::env::var_os("OH_HARNESS_PATH").is_none() {
         cmd.env("OH_HARNESS_PATH", root.join("harnesses/example"));
+    }
+
+    // Namespace the sidecar's config dir (credentials, audit log, state) to
+    // THIS app's identity so distinct brands/builds on the same machine never
+    // share a config dir. Only fill it in if the caller hasn't already set one
+    // (advanced/test override); otherwise it's always the real Tauri identifier.
+    if std::env::var_os("OPENHARNESS_APP_ID").is_none() {
+        cmd.env("OPENHARNESS_APP_ID", app_id);
     }
 
     cmd.spawn()
@@ -94,7 +109,8 @@ fn read_handshake<R: BufRead>(mut reader: R) -> (Option<Handshake>, R) {
 
 fn main() {
     let builder = tauri::Builder::default().setup(|app| {
-        let mut child = spawn_sidecar()
+        let app_id = app.config().identifier.clone();
+        let mut child = spawn_sidecar(&app_id)
             .map_err(|e| format!("failed to spawn Node sidecar (is `node` on PATH?): {e}"))?;
 
         let stdout = child
