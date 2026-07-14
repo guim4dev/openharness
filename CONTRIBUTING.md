@@ -4,6 +4,8 @@ Thanks for wanting to build the harness with us. OpenHarness lets a company defi
 its **own** governed AI harness once and ship it to its people as a TUI and a
 desktop app — signed, self-hosted, MIT. This guide gets you productive fast.
 
+By participating, you agree to uphold our [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## Prerequisites
 
 - **Node ≥ 22.19** (matches Pi's `engines`). We use **npm workspaces** (not pnpm/bun).
