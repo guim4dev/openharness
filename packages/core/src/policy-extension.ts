@@ -35,6 +35,15 @@ export interface PolicyExtensionOptions {
   askUser?: (req: { toolName: string; reason?: string }) => Promise<boolean>;
 }
 
+/** Placeholder that replaces tool_result content when redaction compute fails closed. */
+const REDACTION_ERROR_TEXT = "[result withheld: redaction error]";
+const WITHHELD_CONTENT: { type: "text"; text: string }[] = [{ type: "text", text: REDACTION_ERROR_TEXT }];
+
+/** Fingerprint for an audit entry whose real payload could not be safely computed. */
+function withheldHash(toolName: string): string {
+  return hashCanonical({ withheld: true, tool: toolName });
+}
+
 /** `mcp__<server>__<tool>` -> `<server>`; undefined for non-MCP tools. */
 function parseMcpServer(toolName: string): string | undefined {
   if (!toolName.startsWith("mcp__")) return undefined;
@@ -79,6 +88,18 @@ function finiteNumber(value: unknown): number | undefined {
  * policy fails loud at wiring time) and reused on every hook — the `tool_result`
  * hook is wrapped in try/catch by Pi's runner, so a per-call compile that threw
  * would silently leak the secret. Compiling up-front removes that risk.
+ *
+ * FAIL-CLOSED ON REDACTION COMPUTE FAILURE: `applyRedactors`/`hashCanonical` can
+ * still throw at call time on pathological content they were never handed a
+ * chance to reject up front — a circular reference (stack overflow walking the
+ * object graph) or a non-JSON-serializable value (e.g. a BigInt). Pi's runner
+ * treats a throwing hook as "no result" — for `tool_call` that means the tool
+ * would run with the ORIGINAL, unredacted args; for `tool_result` the ORIGINAL,
+ * unredacted output would re-enter model context. Both hooks therefore wrap
+ * their redaction+hash compute in try/catch and fail closed on throw: `tool_call`
+ * blocks the call (`{ block: true, reason }`), `tool_result` replaces the
+ * content with a withheld placeholder (`isError: true`) instead of forwarding
+ * whatever was computed so far.
  */
 export function buildPolicyExtension(
   policy: Policy,
@@ -125,8 +146,28 @@ export function buildPolicyExtension(
         // Fingerprint the REDACTED args (never the raw args) so a secret in an
         // argument can never be recovered from the audit log — recorded even for
         // denials, which block before the tool ever runs.
+        //
+        // Computed defensively, ONCE, up front: `applyRedactors`/`hashCanonical`
+        // can throw on pathological `event.input` (circular refs, non-JSON-
+        // serializable values). If that throw escaped, it would abort this hook
+        // BEFORE any `return` — Pi's runner treats a throwing hook as "no
+        // result", i.e. the tool call proceeds UNBLOCKED with the original,
+        // unredacted input. A throw here therefore fails closed unconditionally
+        // (denying the call) rather than falling through to whatever `decision`
+        // would otherwise have allowed.
         const server = parseMcpServer(event.toolName);
         const ruleId = matchedRuleId(policy, event.toolName, event.input);
+        let argsHash: string;
+        let redactionComputeFailed = false;
+        try {
+          argsHash = hashCanonical(redactors.length ? applyRedactors(redactors, event.input) : event.input);
+        } catch (e) {
+          redactionComputeFailed = true;
+          argsHash = withheldHash(event.toolName);
+          log(
+            `[openharness/policy] redaction/hash compute failed for tool_call "${event.toolName}", failing closed: ${String(e)}`,
+          );
+        }
         const recordDecision = (auditDecision: ToolDecision): void => {
           safeRecord({
             type: "tool_call",
@@ -134,16 +175,42 @@ export function buildPolicyExtension(
             ...(server ? { server } : {}),
             decision: auditDecision,
             ...(ruleId ? { ruleId } : {}),
-            argsHash: hashCanonical(
-              redactors.length ? applyRedactors(redactors, event.input) : event.input,
-            ),
+            argsHash,
           });
         };
+
+        if (redactionComputeFailed) {
+          recordDecision("deny");
+          return {
+            block: true,
+            reason: `Blocked by policy: redaction of arguments for tool "${event.toolName}" failed; failing closed rather than risk leaking unredacted content.`,
+          };
+        }
 
         if (decision === "deny") {
           recordDecision("deny");
           return { block: true, reason: reason ?? `Blocked by policy: tool "${event.toolName}" is denied.` };
         }
+
+        // Redact args in place, but fail closed if the compute itself throws.
+        // `argsHash` above already proved `applyRedactors` succeeds on this same
+        // `event.input`, so this is defense-in-depth rather than the expected
+        // path — but it keeps the same guarantee even if that invariant ever
+        // breaks (e.g. a future stateful redactor).
+        const redactOrBlock = (): { block: true; reason: string } | undefined => {
+          try {
+            redactInPlace(event.input as Record<string, unknown>);
+            return undefined;
+          } catch (e) {
+            log(
+              `[openharness/policy] redaction compute failed mutating tool_call args for "${event.toolName}", failing closed: ${String(e)}`,
+            );
+            return {
+              block: true,
+              reason: `Blocked by policy: redaction of arguments for tool "${event.toolName}" failed; failing closed rather than risk leaking unredacted content.`,
+            };
+          }
+        };
 
         if (decision === "ask") {
           let approved = false;
@@ -172,42 +239,73 @@ export function buildPolicyExtension(
             };
           }
           // approved ask: redact args before the tool executes, then record.
-          redactInPlace(event.input as Record<string, unknown>);
+          const blocked = redactOrBlock();
+          if (blocked) {
+            recordDecision("deny");
+            return blocked;
+          }
           recordDecision("ask-approved");
           return undefined;
         }
 
         // allow: redact args before the tool executes, then record.
-        redactInPlace(event.input as Record<string, unknown>);
+        const blocked = redactOrBlock();
+        if (blocked) {
+          recordDecision("deny");
+          return blocked;
+        }
         recordDecision("allow");
         return undefined;
       });
 
       pi.on("tool_result", async (event) => {
         const hasRedactors = redactors.length > 0;
-        const content = hasRedactors ? applyRedactors(redactors, event.content) : event.content;
-        const details = hasRedactors ? applyRedactors(redactors, event.details) : event.details;
 
-        // Record through safeRecord so a throwing sink can never skip the
-        // redacted return below — otherwise the ORIGINAL unredacted output would
-        // re-enter model context (fail-open). The redacted return is computed
-        // above and applied unconditionally.
-        if (audit) {
-          const changed =
-            hasRedactors &&
-            (hashCanonical(event.content) !== hashCanonical(content) ||
-              hashCanonical(event.details) !== hashCanonical(details));
-          // Fingerprint the REDACTED result — never the raw content/details.
+        // Compute redaction + the audit fingerprint together, defensively, ALL
+        // inside one try: `applyRedactors`/`hashCanonical` can throw on
+        // pathological content (circular refs, non-JSON-serializable values).
+        // If that throw escaped, it would abort this hook BEFORE the redacted
+        // `return` below — Pi's runner treats a throwing hook as "no result",
+        // i.e. the ORIGINAL, unredacted content would re-enter model context
+        // (fail-open). Fail closed instead: withhold the result entirely.
+        try {
+          const content = hasRedactors ? applyRedactors(redactors, event.content) : event.content;
+          const details = hasRedactors ? applyRedactors(redactors, event.details) : event.details;
+
+          // Record through safeRecord so a throwing sink can never skip the
+          // redacted return below — otherwise the ORIGINAL unredacted output
+          // would re-enter model context (fail-open). The redacted return is
+          // computed above and applied unconditionally.
+          if (audit) {
+            const changed =
+              hasRedactors &&
+              (hashCanonical(event.content) !== hashCanonical(content) ||
+                hashCanonical(event.details) !== hashCanonical(details));
+            // Fingerprint the REDACTED result — never the raw content/details.
+            safeRecord({
+              type: "tool_result",
+              tool: event.toolName,
+              redacted: changed,
+              resultHash: hashCanonical({ content, details }),
+            });
+          }
+
+          if (!hasRedactors) return undefined;
+          return { content, details };
+        } catch (e) {
+          log(
+            `[openharness/policy] redaction/hash compute failed on tool_result for "${event.toolName}", failing closed: ${String(e)}`,
+          );
+          // Record through safeRecord so a throwing sink can never skip the
+          // withheld return below.
           safeRecord({
             type: "tool_result",
             tool: event.toolName,
-            redacted: changed,
-            resultHash: hashCanonical({ content, details }),
+            redacted: true,
+            resultHash: withheldHash(event.toolName),
           });
+          return { content: WITHHELD_CONTENT, isError: true };
         }
-
-        if (!hasRedactors) return undefined;
-        return { content, details };
       });
 
       // A `before_provider_request` handler is needed when either the audit sink
