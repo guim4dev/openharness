@@ -1,4 +1,11 @@
-import { createDpopProof, validateRequest, type Deny, type Principal, type ReplayGuard } from "./auth.ts";
+import {
+  createDpopProof,
+  validateRequest,
+  verifyServerAuth,
+  type Deny,
+  type Principal,
+  type ReplayGuard,
+} from "./auth.ts";
 
 /**
  * DPoP over HTTP — the glue between the harness (MCP client) and the gateway
@@ -11,6 +18,8 @@ import { createDpopProof, validateRequest, type Deny, type Principal, type Repla
  * binding check via `cnf.jkt` is unchanged.)
  */
 const KEY_HEADER = "x-oh-dpop-key";
+/** Response header carrying the gateway's signature over the client's proof. */
+export const SERVER_AUTH_HEADER = "x-oh-gateway-auth";
 
 /** A `fetch`-shaped function (the MCP client transport accepts one to inject). */
 export type FetchLike = (input: unknown, init?: RequestInit) => Promise<Response>;
@@ -50,6 +59,7 @@ export function createDpopFetch(
   clientPublicKeyPem: string,
   baseFetch: FetchLike = fetch as unknown as FetchLike,
   now: () => number = Date.now,
+  gatewayPublicKeyPem?: string,
 ): FetchLike {
   return async (input: unknown, init?: RequestInit) => {
     const raw =
@@ -62,7 +72,18 @@ export function createDpopFetch(
     const proof = createDpopProof(clientPrivateKeyPem, { method, url: proofUrl(raw) }, now());
     const headers = new Headers(init?.headers);
     for (const [k, v] of Object.entries(dpopHeaders(token, proof, clientPublicKeyPem))) headers.set(k, v);
-    return baseFetch(input, { ...init, headers });
+    const res = await baseFetch(input, { ...init, headers });
+
+    // Server authentication: on a successful response, the gateway must prove it
+    // holds the private key for the PINNED pubkey by signing the proof we sent.
+    // A fake gateway (no private key) cannot, so we refuse to trust it.
+    if (gatewayPublicKeyPem && res.ok) {
+      const sig = res.headers.get(SERVER_AUTH_HEADER);
+      if (!sig || !verifyServerAuth(gatewayPublicKeyPem, proof, sig)) {
+        throw new Error("gateway server authentication failed — the endpoint did not prove the pinned key");
+      }
+    }
+    return res;
   };
 }
 

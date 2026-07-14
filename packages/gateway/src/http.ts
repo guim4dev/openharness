@@ -1,8 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { createReplayGuard, isDeny } from "./auth.ts";
-import { dpopFromHttp } from "./dpop-http.ts";
+import { createReplayGuard, isDeny, signServerAuth } from "./auth.ts";
+import { dpopFromHttp, SERVER_AUTH_HEADER } from "./dpop-http.ts";
 import { createGateway, type GatewayPipeline } from "./server.ts";
 import type { ToolSpec } from "./catalog.ts";
 
@@ -23,6 +23,13 @@ export interface GatewayHttpOptions {
   pipeline: Omit<GatewayPipeline, "resolvePrincipal">;
   /** The gateway's ed25519 public key (PEM) — verifies the access token. */
   gatewayPublicKeyPem: string;
+  /**
+   * The gateway's ed25519 PRIVATE key (PEM). When set, every response is signed
+   * (`x-oh-gateway-auth`, bound to the request's DPoP proof) so the client can
+   * verify it is talking to the gateway whose `pubkey` its definition pinned —
+   * not a fake. Omit only for dev/tests that don't exercise server auth.
+   */
+  gatewayPrivateKeyPem?: string;
   host?: string;
   port?: number;
   /** MCP endpoint path (default "/mcp"). */
@@ -86,6 +93,14 @@ export async function startGatewayHttp(opts: GatewayHttpOptions): Promise<Gatewa
     if (isDeny(principal)) {
       unauthorized(res);
       return;
+    }
+
+    // 1b. Prove our identity: sign the client's DPoP proof with the gateway
+    //     private key so the client can verify it against the pinned pubkey.
+    //     Set before the SDK writes the response (writeHead merges setHeader).
+    if (opts.gatewayPrivateKeyPem) {
+      const proof = (req.headers as Record<string, string | undefined>).dpop;
+      if (proof) res.setHeader(SERVER_AUTH_HEADER, signServerAuth(opts.gatewayPrivateKeyPem, proof));
     }
 
     // 2. Per-request stateless MCP server with the caller's Principal pinned.

@@ -9,6 +9,8 @@ export {
   createDpopProof,
   validateRequest,
   createReplayGuard,
+  signServerAuth,
+  verifyServerAuth,
   isDeny,
 } from "./auth.ts";
 export type { GatewayClaims, Principal, Deny, IncomingRequest, ReplayGuard } from "./auth.ts";
@@ -25,7 +27,7 @@ export { createApprovalQueue } from "./approval.ts";
 export type { ApprovalQueue, PendingApproval } from "./approval.ts";
 export { createConnectorSessions } from "./sessions.ts";
 export type { ConnectorSessions } from "./sessions.ts";
-export { createDpopFetch, dpopFromHttp, dpopHeaders, proofUrl } from "./dpop-http.ts";
+export { createDpopFetch, dpopFromHttp, dpopHeaders, proofUrl, SERVER_AUTH_HEADER } from "./dpop-http.ts";
 export type { FetchLike } from "./dpop-http.ts";
 export { startGatewayHttp } from "./http.ts";
 export type { GatewayHttpOptions, GatewayHttpServer } from "./http.ts";

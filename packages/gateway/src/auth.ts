@@ -136,6 +136,29 @@ export function mintGatewayToken(
   return signCompact(payload, gatewayPrivateKeyPem);
 }
 
+/**
+ * Server-identity proof. The gateway signs a value bound to the client's DPoP
+ * proof with its own private key; the client verifies against the `pubkey`
+ * PINNED in the signed definition. This is what makes the pin real: a fake
+ * gateway (rogue URL, DNS/ARP spoof) that lacks the private key cannot produce a
+ * valid signature, so the client refuses to trust it. Binding to the (single-use)
+ * client proof means a captured server signature can't be replayed to a
+ * different exchange. (Channel confidentiality against a transparent forwarding
+ * proxy is TLS's job — see the https requirement in the harness bridge.)
+ */
+export function signServerAuth(gatewayPrivateKeyPem: string, boundValue: string): string {
+  return b64u(sign(null, Buffer.from(boundValue), gatewayPrivateKeyPem));
+}
+
+/** Verify a server-identity proof against the pinned gateway public key. */
+export function verifyServerAuth(gatewayPublicKeyPem: string, boundValue: string, signature: string): boolean {
+  try {
+    return verify(null, Buffer.from(boundValue), gatewayPublicKeyPem, fromB64u(signature));
+  } catch {
+    return false;
+  }
+}
+
 /** Build a DPoP proof for a request (the client holds the private key). */
 export function createDpopProof(
   clientPrivateKeyPem: string,

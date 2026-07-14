@@ -53,6 +53,7 @@ async function boot(policyRaw: unknown = { default: "allow", rules: [] }) {
   running = await startGatewayHttp({
     catalog: CATALOG,
     gatewayPublicKeyPem: gatewayKeys.publicKey,
+    gatewayPrivateKeyPem: gatewayKeys.privateKey,
     pipeline: {
       policy: parsePolicy(policyRaw),
       policyVersion: "1.0.0",
@@ -111,6 +112,24 @@ test("a denied gateway tool throws when executed, and the upstream is never reac
   } finally {
     await dispose();
   }
+});
+
+test("requires https for a non-loopback gateway (refuses credentials over plaintext)", async () => {
+  const gatewayKeys = generateAuthKeypair();
+  const client = generateAuthKeypair();
+  const token = mintGatewayToken(CLAIMS, gatewayKeys.privateKey, client.publicKey, { ttlMs: 60_000, now: Date.now() });
+  const auth: GatewayAuth = { token, clientPublicKey: client.publicKey, clientPrivateKey: client.privateKey };
+  const config: HarnessGatewayConfig = { url: "http://gw.acme.internal/mcp", pubkey: gatewayKeys.publicKey, tools: [] };
+  await expect(loadGatewayTools(config, auth)).rejects.toThrow(/https/);
+});
+
+test("pin enforced: a gateway not proving the pinned pubkey is refused (fake gateway)", async () => {
+  const { auth, config } = await boot();
+  // Same URL + a valid token, but the harness pinned the WRONG pubkey: the real
+  // gateway's response signature won't verify against it -> the client refuses.
+  const impostorPin = generateAuthKeypair().publicKey;
+  const badConfig: HarnessGatewayConfig = { ...config, pubkey: impostorPin };
+  await expect(loadGatewayTools(badConfig, auth)).rejects.toThrow();
 });
 
 test("fail-closed: a declared gateway that cannot be reached throws (offline hard-fail)", async () => {

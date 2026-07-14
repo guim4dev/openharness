@@ -43,6 +43,7 @@ async function boot(policyRaw: unknown = { default: "allow", rules: [] }) {
   running = await startGatewayHttp({
     catalog: CATALOG,
     gatewayPublicKeyPem: gateway.publicKey,
+    gatewayPrivateKeyPem: gateway.privateKey,
     pipeline: {
       policy: parsePolicy(policyRaw),
       policyVersion: "1.0.0",
@@ -55,14 +56,15 @@ async function boot(policyRaw: unknown = { default: "allow", rules: [] }) {
   return { gateway, url: running.url, audit: captured };
 }
 
-/** A real MCP client that authenticates with a DPoP-bound token. */
-async function connectClient(url: string, gatewayPrivateKey: string): Promise<Client> {
+/** A real MCP client that authenticates with a DPoP-bound token, optionally
+ *  pinning the gateway's public key (verifies the server's response signature). */
+async function connectClient(url: string, gatewayPrivateKey: string, pinnedPubkey?: string): Promise<Client> {
   const client = generateAuthKeypair();
   const token = mintGatewayToken(CLAIMS, gatewayPrivateKey, client.publicKey, {
     ttlMs: 60_000,
     now: Date.now(),
   });
-  const dpopFetch = createDpopFetch(token, client.privateKey, client.publicKey);
+  const dpopFetch = createDpopFetch(token, client.privateKey, client.publicKey, undefined, undefined, pinnedPubkey);
   const transport = new StreamableHTTPClientTransport(new URL(url), {
     fetch: dpopFetch as unknown as typeof fetch,
   });
@@ -96,6 +98,23 @@ test("e2e over real HTTP: a client WITHOUT DPoP is rejected at the edge (401)", 
   const transport = new StreamableHTTPClientTransport(new URL(url)); // plain fetch, no DPoP
   const mcp = new Client({ name: "attacker", version: "0" }, { capabilities: {} });
   await expect(mcp.connect(transport)).rejects.toThrow();
+});
+
+test("e2e over real HTTP: a client pinning the correct pubkey verifies the server; a wrong pin is refused", async () => {
+  const { gateway, url } = await boot();
+
+  // Correct pin: the gateway signs each response with its private key -> verified.
+  const good = await connectClient(url, gateway.privateKey, gateway.publicKey);
+  try {
+    const res = await good.callTool({ name: "github__list_issues", arguments: { owner: "acme", repo: "app" } });
+    expect(res.isError).toBeFalsy();
+  } finally {
+    await good.close();
+  }
+
+  // Wrong pin: the response signature won't verify -> the client refuses to trust it.
+  const impostorPin = generateAuthKeypair().publicKey;
+  await expect(connectClient(url, gateway.privateKey, impostorPin)).rejects.toThrow();
 });
 
 test("e2e over real HTTP: a malformed request does not crash the shared server", async () => {

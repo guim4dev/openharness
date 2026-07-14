@@ -52,7 +52,20 @@ export async function loadGatewayTools(
 ): Promise<LoadGatewayToolsResult> {
   const namespace = options.namespace ?? "gateway";
   const connect = options.connect ?? connectGatewayServer;
-  const fetchImpl = createDpopFetch(auth.token, auth.clientPrivateKey, auth.clientPublicKey) as GatewayFetch;
+  // Refuse to send credentials over plaintext to a non-loopback host — TLS is
+  // what keeps a network observer from reading the token + proof at all.
+  requireSecureUrl(gateway.url);
+  // Pin the server identity: the fetch verifies every response is signed by the
+  // private key matching the definition's pinned `pubkey`, so a fake gateway is
+  // refused (see createDpopFetch / signServerAuth).
+  const fetchImpl = createDpopFetch(
+    auth.token,
+    auth.clientPrivateKey,
+    auth.clientPublicKey,
+    undefined,
+    undefined,
+    gateway.pubkey,
+  ) as GatewayFetch;
 
   let conn: McpConnection;
   try {
@@ -82,4 +95,21 @@ export async function loadGatewayTools(
 
 function errText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** A non-loopback gateway must be reached over https (credentials on the wire). */
+function requireSecureUrl(url: string): void {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    throw new Error(`gateway url '${url}' is not a valid URL`);
+  }
+  const host = u.hostname.replace(/^\[|\]$/g, "");
+  const loopback = host === "127.0.0.1" || host === "localhost" || host === "::1";
+  if (u.protocol !== "https:" && !loopback) {
+    throw new Error(
+      `gateway url '${url}' must use https — refusing to send credentials over an unencrypted channel (plaintext is allowed only for loopback dev/test).`,
+    );
+  }
 }
