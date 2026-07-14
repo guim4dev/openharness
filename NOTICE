@@ -1,0 +1,13 @@
+OpenHarness
+Copyright (c) 2026 OpenHarness contributors
+
+This product includes and builds upon third-party open-source software:
+
+- Pi (https://pi.dev, github.com/earendil-works/pi) — MIT License.
+  The agent core OpenHarness ships on top of.
+- @modelcontextprotocol/sdk — MIT License. MCP client transports.
+- Tauri (https://tauri.app) — MIT/Apache-2.0. The desktop shell.
+- zod, esbuild, vitest, React, and other dependencies under their respective
+  MIT/Apache-2.0 licenses (see each package's LICENSE and package-lock.json).
+
+All trademarks are the property of their respective owners.

@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenHarness — build your company's own AI harness</title>
+<meta name="description" content="Open-source, self-hosted platform to build your company's own governed AI harness — shipped as a TUI and a signed desktop app that refuses config it can't verify.">
+<meta property="og:title" content="OpenHarness">
+<meta property="og:description" content="Your company's own AI harness. Owned end to end. Signed, governed, self-hosted.">
+</head>
+<body>
+<style>
+  :root{
+    --bg:#0d0f14; --bg2:#12151c; --panel:#161a22; --line:#242a35; --line2:#2e3543;
+    --ink:#eef1f6; --ink2:#a7afbe; --ink3:#6f7889;
+    --amber:#e0a15a; --amber-deep:#c8791f; --amber-soft:#2a2013;
+    --good:#57c98a; --good-soft:#12281c; --bad:#f0685f; --bad-soft:#2b1513;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:ui-sans-serif,-apple-system,"Segoe UI","Helvetica Neue",system-ui,sans-serif;
+    --maxw:1080px;
+  }
+  :root[data-theme="light"]{
+    --bg:#f6f6f2; --bg2:#efeee8; --panel:#ffffff; --line:#e3e1d7; --line2:#d6d3c6;
+    --ink:#181a1f; --ink2:#4c525d; --ink3:#8a9099;
+    --amber:#b9722a; --amber-deep:#a15f18; --amber-soft:#f4e6d4;
+    --good:#2f8f5b; --good-soft:#dcefe3; --bad:#c0392b; --bad-soft:#f6ddd8;
+  }
+  @media (prefers-color-scheme: light){
+    :root:not([data-theme="dark"]){
+      --bg:#f6f6f2; --bg2:#efeee8; --panel:#ffffff; --line:#e3e1d7; --line2:#d6d3c6;
+      --ink:#181a1f; --ink2:#4c525d; --ink3:#8a9099;
+      --amber:#b9722a; --amber-deep:#a15f18; --amber-soft:#f4e6d4;
+      --good:#2f8f5b; --good-soft:#dcefe3; --bad:#c0392b; --bad-soft:#f6ddd8;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.55;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  a{color:inherit}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 clamp(18px,4vw,28px)}
+  .mono{font-family:var(--mono)}
+  .eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.22em;text-transform:uppercase;color:var(--amber)}
+
+  /* nav */
+  nav{position:sticky;top:0;z-index:20;backdrop-filter:blur(10px);background:color-mix(in srgb,var(--bg) 82%,transparent);border-bottom:1px solid var(--line)}
+  nav .row{display:flex;align-items:center;justify-content:space-between;height:60px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:-.01em;font-size:16px}
+  .brand .seal{width:22px;height:22px;border-radius:6px;background:linear-gradient(135deg,var(--amber),var(--amber-deep));display:grid;place-items:center;color:#1a1206;font-family:var(--mono);font-weight:800;font-size:13px;box-shadow:0 0 0 1px color-mix(in srgb,var(--amber) 40%,transparent),0 4px 14px color-mix(in srgb,var(--amber) 25%,transparent)}
+  .brand b .oh{color:var(--amber)}
+  nav .links{display:flex;align-items:center;gap:20px;font-size:13.5px;color:var(--ink2)}
+  nav .links a{ text-decoration:none }
+  nav .links a:hover{color:var(--ink)}
+  .btn{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12.5px;letter-spacing:.02em;padding:9px 15px;border-radius:9px;text-decoration:none;border:1px solid var(--line2);color:var(--ink);transition:.16s}
+  .btn:hover{border-color:var(--amber);color:var(--amber)}
+  .btn.solid{background:linear-gradient(135deg,var(--amber),var(--amber-deep));color:#1a1206;border-color:transparent;font-weight:600}
+  .btn.solid:hover{color:#1a1206;filter:brightness(1.06)}
+  nav .links .hideSm{ }
+  @media(max-width:640px){ .hideSm{display:none} }
+
+  /* hero */
+  header.hero{position:relative;padding:clamp(48px,9vw,104px) 0 clamp(36px,6vw,64px)}
+  .hero .grid{display:grid;gap:clamp(28px,4vw,46px);grid-template-columns:1fr}
+  @media(min-width:900px){ .hero .grid{grid-template-columns:1.05fr .95fr;align-items:center} }
+  h1{font-size:clamp(34px,6vw,62px);line-height:1.02;letter-spacing:-.03em;margin:16px 0 0;text-wrap:balance;font-weight:800}
+  h1 .em{background:linear-gradient(120deg,var(--amber),#f0c48a);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lede{margin:20px 0 0;font-size:clamp(16px,2.1vw,19px);color:var(--ink2);max-width:34ch}
+  .heroCtas{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px}
+  .fineprint{margin-top:18px;font-family:var(--mono);font-size:11.5px;color:var(--ink3);letter-spacing:.03em}
+
+  /* terminal */
+  .term{background:var(--bg2);border:1px solid var(--line2);border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,.35),0 0 0 1px color-mix(in srgb,var(--amber) 8%,transparent);overflow:hidden;font-family:var(--mono);font-size:12.6px}
+  .term .bar{display:flex;align-items:center;gap:7px;padding:11px 14px;border-bottom:1px solid var(--line);color:var(--ink3)}
+  .term .bar i{width:11px;height:11px;border-radius:50%;background:var(--line2);display:block}
+  .term .bar i:nth-child(1){background:#e0685f55}.term .bar i:nth-child(2){background:#e0a15a55}.term .bar i:nth-child(3){background:#57c98a55}
+  .term .bar span{margin-left:8px;font-size:11px;letter-spacing:.08em;text-transform:uppercase}
+  .term .body{padding:16px 16px 18px;min-height:280px}
+  .term .ln{white-space:pre-wrap;word-break:break-word;margin:0 0 3px}
+  .term .p{color:var(--amber)}
+  .term .dim{color:var(--ink3)}
+  .term .ok{color:var(--good)}
+  .term .bad{color:var(--bad);font-weight:600}
+  .term .cursor{display:inline-block;width:8px;height:15px;background:var(--amber);vertical-align:-2px;animation:blink 1s steps(1) infinite;margin-left:2px}
+  @keyframes blink{50%{opacity:0}}
+  .chip{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;padding:2px 8px;border-radius:999px;border:1px solid currentColor}
+  .chip.ok{color:var(--good);background:var(--good-soft)}
+  .chip.bad{color:var(--bad);background:var(--bad-soft)}
+
+  /* sections */
+  section{padding:clamp(44px,7vw,88px) 0;border-top:1px solid var(--line)}
+  .kicker{display:flex;align-items:center;gap:12px;margin-bottom:22px}
+  .kicker h2{font-size:clamp(22px,3.4vw,32px);letter-spacing:-.02em;margin:0;font-weight:750;text-wrap:balance}
+  .kicker .n{font-family:var(--mono);font-size:12px;color:var(--amber);border:1px solid var(--line2);border-radius:7px;padding:3px 8px}
+  .sub{color:var(--ink2);max-width:62ch;font-size:15.5px;margin:0 0 30px}
+
+  .cards{display:grid;gap:14px;grid-template-columns:1fr}
+  @media(min-width:720px){ .cards.c2{grid-template-columns:1fr 1fr} .cards.c4{grid-template-columns:1fr 1fr} }
+  @media(min-width:1000px){ .cards.c4{grid-template-columns:repeat(4,1fr)} }
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:20px;transition:.18s}
+  .card:hover{border-color:var(--line2);transform:translateY(-2px)}
+  .card .ic{font-family:var(--mono);font-size:11px;color:var(--amber);letter-spacing:.1em;text-transform:uppercase}
+  .card h3{margin:12px 0 7px;font-size:16.5px;letter-spacing:-.01em}
+  .card p{margin:0;color:var(--ink2);font-size:13.6px}
+  .card code{font-family:var(--mono);font-size:12px;color:var(--ink);background:var(--bg2);border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+
+  .flow{display:grid;gap:12px;grid-template-columns:1fr}
+  @media(min-width:820px){ .flow{grid-template-columns:1fr 1fr 1fr;align-items:stretch} }
+  .step{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:20px;position:relative}
+  .step .k{font-family:var(--mono);color:var(--amber);font-size:12px}
+  .step h4{margin:9px 0 6px;font-size:15.5px}
+  .step p{margin:0;color:var(--ink2);font-size:13.4px}
+
+  .pull{font-size:clamp(20px,3vw,30px);line-height:1.25;letter-spacing:-.02em;max-width:24ch;text-wrap:balance;font-weight:650}
+  .pull .em{color:var(--amber)}
+  .two{display:grid;gap:clamp(24px,4vw,48px);grid-template-columns:1fr}
+  @media(min-width:900px){ .two{grid-template-columns:1fr 1fr;align-items:center} }
+
+  ul.ticks{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+  ul.ticks li{padding-left:26px;position:relative;color:var(--ink);font-size:14.5px}
+  ul.ticks li::before{content:"→";position:absolute;left:0;color:var(--amber);font-family:var(--mono)}
+
+  pre.code{background:var(--bg2);border:1px solid var(--line2);border-radius:12px;padding:16px;overflow-x:auto;font-family:var(--mono);font-size:12.6px;color:var(--ink);margin:0;line-height:1.7}
+  pre.code .p{color:var(--amber)} pre.code .dim{color:var(--ink3)} pre.code .s{color:var(--good)}
+
+  .cta{text-align:center;background:radial-gradient(120% 140% at 50% 0%,color-mix(in srgb,var(--amber) 12%,transparent),transparent 60%)}
+  .cta h2{font-size:clamp(26px,4.5vw,44px);letter-spacing:-.025em;margin:0 auto 14px;max-width:18ch;text-wrap:balance;font-weight:800}
+  .cta p{color:var(--ink2);max-width:52ch;margin:0 auto 26px}
+  .cta .heroCtas{justify-content:center}
+
+  footer{border-top:1px solid var(--line);padding:30px 0 44px;color:var(--ink3);font-family:var(--mono);font-size:11.5px}
+  footer .row{display:flex;flex-wrap:wrap;gap:14px;justify-content:space-between;align-items:center}
+
+  .reveal{opacity:0;transform:translateY(14px);transition:opacity .6s ease,transform .6s ease}
+  .reveal.in{opacity:1;transform:none}
+  @media(prefers-reduced-motion:reduce){ .reveal{opacity:1;transform:none;transition:none} .cursor{animation:none} }
+</style>
+
+<nav>
+  <div class="wrap row">
+    <div class="brand"><span class="seal mono">◆</span><b><span class="oh">Open</span>Harness</b></div>
+    <div class="links">
+      <a class="hideSm" href="#what">What</a>
+      <a class="hideSm" href="#governance">Governance</a>
+      <a class="hideSm" href="#moat">The seal</a>
+      <a class="btn" href="https://github.com/guim4dev/openharness">GitHub ↗</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap grid">
+    <div>
+      <div class="eyebrow">Open-source · self-hosted · MIT</div>
+      <h1>Your company's <span class="em">own</span> AI harness. Owned end to end.</h1>
+      <p class="lede">Define your agents once — prompts, tools, policy, credentials, branding — and ship them to your people as a terminal <em>and</em> a desktop app. Governed. Self-hosted. It won't run a config you didn't sign.</p>
+      <div class="heroCtas">
+        <a class="btn solid" href="https://github.com/guim4dev/openharness">Star on GitHub</a>
+        <a class="btn" href="#moat">See the seal ↓</a>
+      </div>
+      <div class="fineprint">built on Pi (MIT) · TypeScript · Tauri · your keys, your infra</div>
+    </div>
+
+    <div class="term reveal in" id="term" aria-label="Demo: build a branded harness, then tamper it and watch it refuse to run">
+      <div class="bar"><i></i><i></i><i></i><span>openharness — the 90-second story</span></div>
+      <div class="body" id="termBody"></div>
+    </div>
+  </div>
+</header>
+
+<section id="problem">
+  <div class="wrap">
+    <div class="kicker"><span class="n">01</span><h2>Agents are everywhere. Control is nowhere.</h2></div>
+    <p class="sub">Every team wires its own prompts, keys, and tools into scattered agent tools. The company gets no shared standard, no view of what agents did, and secrets sprayed across laptops. OpenHarness centralizes the <em>definition</em> of how agents work — while execution stays local and the whole stack stays yours.</p>
+    <div class="pull">The model is becoming a commodity. <span class="em">The harness is the moat.</span></div>
+  </div>
+</section>
+
+<section id="what">
+  <div class="wrap">
+    <div class="kicker"><span class="n">02</span><h2>One definition → two frontends, fully governed</h2></div>
+    <p class="sub">A <code class="mono">HarnessDefinition</code> is a folder: a system prompt, mandatory skills, MCP tools, a policy, branding, and which credentials to use. It becomes both surfaces from the same core.</p>
+    <div class="cards c2">
+      <div class="card"><div class="ic">TUI</div><h3>For your engineers</h3><p>A branded terminal harness over a real agent core — the full-power surface for technical staff.</p></div>
+      <div class="card"><div class="ic">Desktop</div><h3>For everyone else</h3><p>A native cross-platform app (Windows · Linux · macOS). Real chat UI, no terminal required.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="governance">
+  <div class="wrap">
+    <div class="kicker"><span class="n">03</span><h2>Governance without losing control</h2></div>
+    <p class="sub">Enforcement lives <em>in-process</em>, at the seam every tool call passes through — it can't be prompt-jailbroken or routed around. The org defines it; the harness applies it, offline.</p>
+    <div class="cards c4">
+      <div class="card"><div class="ic">MCP</div><h3>Tools you control</h3><p>MCP servers bridged in as <code>mcp__server__tool</code>. Mandatory ones must connect. Secrets referenced by name — never baked into the shipped app.</p></div>
+      <div class="card"><div class="ic">Policy</div><h3>Deny by default</h3><p>Claude-Code-style rules: allow / deny / ask, plus secret redaction on the way in <em>and</em> out. A denied action shows a branded block, not a leak.</p></div>
+      <div class="card"><div class="ic">Audit</div><h3>What agents did</h3><p>Hash-chained JSONL of external calls only — never prompts. The server retains the authoritative, continuity-checked record.</p></div>
+      <div class="card"><div class="ic">Bundles</div><h3>Signed config</h3><p>Definitions are ed25519-signed. The app boots pinned to a verified one and refuses anything unsigned, tampered, or rolled back.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="moat">
+  <div class="wrap two">
+    <div>
+      <div class="kicker"><span class="n">04</span><h2>The seal: flip one byte, it refuses</h2></div>
+      <p class="sub" style="margin-bottom:20px"><code class="mono">openharness build</code> turns a definition into a branded, signed desktop app — each brand fully isolated. The app boots pinned to its signed configuration.</p>
+      <ul class="ticks">
+        <li>Two brands, one substrate — distinct identity, isolated credentials &amp; audit.</li>
+        <li>The org's private key never enters the artifact (there's a test that greps for it).</li>
+        <li>Tamper the config → the app opens to an integrity-refusal screen, not your agent.</li>
+      </ul>
+    </div>
+    <div>
+      <div class="term">
+        <div class="bar"><i></i><i></i><i></i><span>integrity check</span></div>
+        <div class="body">
+<p class="ln"><span class="dim">$</span> <span class="p">openharness</span> bundle verify acme.ohbundle</p>
+<p class="ln"><span class="ok">bundle OK</span> — acme-fintech@0.1.0 <span class="chip ok">verified</span></p>
+<p class="ln">&nbsp;</p>
+<p class="ln"><span class="dim"># an attacker flips one byte…</span></p>
+<p class="ln"><span class="dim">$</span> <span class="p">openharness</span> bundle verify acme.ohbundle</p>
+<p class="ln"><span class="bad">bundle REJECTED</span> — signature verification failed <span class="chip bad">refused</span></p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="byok">
+  <div class="wrap two">
+    <div>
+      <div class="term">
+        <div class="bar"><i></i><i></i><i></i><span>bring your own model</span></div>
+        <div class="body">
+<pre class="code" style="border:0;background:transparent;padding:0"><span class="dim"># any provider — the harness doesn't care</span>
+<span class="p">export</span> ANTHROPIC_API_KEY=sk-...
+<span class="p">npm</span> run chat -- harnesses/acme-fintech <span class="s">"triage this incident"</span>
+
+<span class="dim"># pool org keys, rotate on rate-limit,</span>
+<span class="dim"># or point at a local model. LLMs are fungible.</span></pre>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="kicker"><span class="n">05</span><h2>Bring your own model</h2></div>
+      <p class="sub">API keys, gateway subscriptions (OpenCode Go), or a local runtime — plug in whatever, switch mid-session, rotate multiple org accounts on rate-limit. The bet: models commoditize, so we stay neutral on them and invest in the layer that lasts.</p>
+    </div>
+  </div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <div class="kicker"><span class="n">06</span><h2>Ship a branded app in three commands</h2></div>
+    <p class="sub">Self-hosted, no SaaS in the loop. Open the box and build.</p>
+    <div class="flow">
+      <div class="step"><div class="k">01 · sign</div><h4>Mint your org key</h4><p><code class="mono">openharness keygen</code> — the private key stays with you; the public key rides in the app.</p></div>
+      <div class="step"><div class="k">02 · build</div><h4>Brand + sign</h4><p><code class="mono">openharness build acme/</code> → a signed, isolated desktop app with your policy baked in.</p></div>
+      <div class="step"><div class="k">03 · ship</div><h4>Distribute</h4><p>Push the signed definition; installed apps re-fetch, verify, and refuse anything stale or forged.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="cta" id="cta">
+  <div class="wrap">
+    <div class="eyebrow" style="margin-bottom:14px">Open source · Apache-friendly · self-hosted</div>
+    <h2>Own your agents. Not the other way around.</h2>
+    <p>OpenHarness is MIT and self-hostable — no vendor between your employees and your data. Star it, fork it, ship your own.</p>
+    <div class="heroCtas">
+      <a class="btn solid" href="https://github.com/guim4dev/openharness">Get it on GitHub ↗</a>
+      <a class="btn" href="https://github.com/guim4dev/openharness/blob/main/docs/DEMO.md">Read the 90-second demo</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap row">
+    <span>OpenHarness · MIT · built on <a href="https://pi.dev" style="color:var(--amber);text-decoration:none">Pi</a></span>
+    <span>the model is a commodity — the harness is the moat</span>
+  </div>
+</footer>
+
+<script>
+  (function(){
+    var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // scroll reveals
+    var io = new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}});},{threshold:.14});
+    document.querySelectorAll('section .wrap > *, .card, .step').forEach(function(el,i){el.classList.add('reveal');el.style.transitionDelay=(Math.min(i,6)*40)+'ms';io.observe(el);});
+
+    // hero terminal type-out
+    var lines = [
+      {t:'$ ',c:'dim',x:'openharness build harnesses/acme-fintech --out dist/acme',p:'p'},
+      {t:'',x:'built Acme Engineer (ai.openharness.acme.assistant)',c:'ok'},
+      {t:'',x:'  bundle acme-fintech@0.1.0 · resources: harness.ohbundle, org.pub, server.mjs',c:'dim'},
+      {t:'$ ',c:'dim',x:'openharness build harnesses/northwind-ops --out dist/northwind',p:'p'},
+      {t:'',x:'built Northwind Ops Copilot (ai.openharness.northwind.ops) · isolated',c:'ok'},
+      {t:'',x:'',c:'dim'},
+      {t:'',x:'# a teammate opens Acme Engineer → it boots pinned to the signed config',c:'dim'},
+      {t:'',x:'# now flip one byte in the bundle…',c:'dim'},
+      {t:'',x:'Configuration could not be verified — app locked.',c:'bad'}
+    ];
+    var body = document.getElementById('termBody');
+    if(!body) return;
+    function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;');}
+    function render(idx, partial){
+      var html='';
+      for(var i=0;i<idx;i++){var l=lines[i];html+='<p class="ln">'+(l.t?'<span class="dim">'+esc(l.t)+'</span>':'')+'<span class="'+(l.p||l.c||'')+'">'+esc(l.x)+'</span></p>';}
+      if(idx<lines.length){var l=lines[idx];html+='<p class="ln">'+(l.t?'<span class="dim">'+esc(l.t)+'</span>':'')+'<span class="'+(l.p||l.c||'')+'">'+esc(partial)+'</span><span class="cursor"></span></p>';}
+      body.innerHTML=html;
+    }
+    if(reduce){ // just show the final state
+      var html=''; lines.forEach(function(l){html+='<p class="ln">'+(l.t?'<span class="dim">'+esc(l.t)+'</span>':'')+'<span class="'+(l.p||l.c||'')+'">'+esc(l.x)+'</span></p>';}); body.innerHTML=html; return;
+    }
+    var li=0, ci=0;
+    function tick(){
+      if(li>=lines.length){ return; }
+      var full=lines[li].x;
+      if(ci<=full.length){ render(li, full.slice(0,ci)); ci++; setTimeout(tick, full.length>40?8:22); }
+      else { li++; ci=0; setTimeout(tick, lines[li-1].x===''?120:420); }
+    }
+    setTimeout(tick, 500);
+  })();
+</script>
+
+</body>
+</html>
