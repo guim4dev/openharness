@@ -213,6 +213,21 @@ describe("chatReducer", () => {
     );
     expect(state.pendingAsks).toHaveLength(1);
   });
+
+  test("definition_saved records the save outcome without touching chat status", () => {
+    const state = feed(initialChatState, {
+      type: "definition_saved",
+      ok: true,
+      dir: "/cfg/definitions/acme",
+      problems: [{ level: "warn", code: "mcp-server-unpinned", message: "pin it" }],
+    });
+    expect(state.status).toBe("idle"); // authoring is orthogonal to the conversation
+    expect(state.saveResult).toEqual({
+      ok: true,
+      dir: "/cfg/definitions/acme",
+      problems: [{ level: "warn", code: "mcp-server-unpinned", message: "pin it" }],
+    });
+  });
 });
 
 /** Minimal synchronous WebSocket stand-in the hook drives during the test. */

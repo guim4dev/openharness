@@ -1,4 +1,5 @@
 import { useBuilder, type PolicyAction } from "./builder.ts";
+import type { SaveResult } from "./chat.ts";
 
 /**
  * Visual harness builder — author `harness.json` + `policy.json` from a form,
@@ -8,7 +9,17 @@ import { useBuilder, type PolicyAction } from "./builder.ts";
  */
 const ACTIONS: PolicyAction[] = ["allow", "deny", "ask"];
 
-export function BuilderPanel({ onClose }: { onClose?: () => void }) {
+export interface BuilderPanelProps {
+  onClose?: () => void;
+  /** Persist the current draft (sends it to the sidecar). Absent → no save affordance. */
+  onSave?: (input: { name: string; manifest: unknown; policy: unknown; systemPrompt: string }) => void;
+  /** Whether saving is currently possible (connected to the sidecar). */
+  canSave?: boolean;
+  /** The last save outcome to surface (from the sidecar's `definition_saved`). */
+  saveResult?: SaveResult;
+}
+
+export function BuilderPanel({ onClose, onSave, canSave, saveResult }: BuilderPanelProps) {
   const b = useBuilder();
 
   return (
@@ -224,6 +235,32 @@ export function BuilderPanel({ onClose }: { onClose?: () => void }) {
             System prompt is written to <code>system-prompt.md</code>. Save these files to a directory, then run{" "}
             <code>openharness doctor &lt;dir&gt;</code> to verify before building.
           </p>
+          {onSave ? (
+            <div className="builder-save">
+              <button
+                type="button"
+                className="builder-save-btn"
+                disabled={!b.valid || !canSave}
+                onClick={() =>
+                  onSave({ name: b.draft.name, manifest: b.manifest, policy: b.policy, systemPrompt: b.draft.systemPrompt })
+                }
+              >
+                {canSave ? "Save & verify" : "Connecting…"}
+              </button>
+              {saveResult ? (
+                <p
+                  className={`builder-save-result builder-save-result-${saveResult.error ? "bad" : saveResult.ok ? "ok" : "warn"}`}
+                  role="status"
+                >
+                  {saveResult.error
+                    ? `Couldn't save: ${saveResult.error}`
+                    : saveResult.ok
+                      ? `Saved to ${saveResult.dir} — doctor OK${saveResult.problems.length ? ` (${saveResult.problems.length} warning(s))` : ""}.`
+                      : `Saved to ${saveResult.dir}, but doctor found ${saveResult.problems.filter((p) => p.level === "error").length} error(s) — fix before building.`}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </aside>
       </div>
     </div>

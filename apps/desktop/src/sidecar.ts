@@ -3,8 +3,10 @@ import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer } from "ws";
 import type { WebSocket } from "ws";
-import { configDir, createLiveSession, persistOnboardedAccount } from "@openharness/core";
-import type { CreateLiveSessionOptions, LiveSession } from "@openharness/core";
+import { join } from "node:path";
+import { configDir, createLiveSession, persistOnboardedAccount, runDoctor } from "@openharness/core";
+import type { CreateLiveSessionOptions, DoctorProblem, LiveSession } from "@openharness/core";
+import { writeHarnessDefinition, MaterializeError } from "@openharness/definition";
 import { BundleVerificationError } from "@openharness/bundle";
 
 /** Frames the client sends to the sidecar. */
@@ -21,7 +23,15 @@ export type ClientMessage =
    * machine-local encrypted store and registered on the manager for the
    * harness's provider; the sidecar then replies `ready` or `needs_setup`.
    */
-  | { type: "set_credential"; secret: string };
+  | { type: "set_credential"; secret: string }
+  /**
+   * A definition authored in the visual builder to persist. The sidecar writes it
+   * to a computed, name-derived directory under the app's config dir (no file
+   * dialog), runs `doctor`, and replies `definition_saved`. `manifest`/`policy`
+   * are the `harness.json`/`policy.json` objects; `systemPrompt` becomes
+   * `system-prompt.md`.
+   */
+  | { type: "save_definition"; name: string; manifest: unknown; policy?: unknown; systemPrompt: string };
 
 /** Frames the sidecar streams back to the client. */
 export type ServerMessage =
@@ -55,7 +65,13 @@ export type ServerMessage =
    */
   | { type: "needs_setup"; provider: string; profile: string; configPath: string; error?: string }
   /** A credential is now in place (after `set_credential`): chat is enabled. */
-  | { type: "ready" };
+  | { type: "ready" }
+  /**
+   * Result of a `save_definition`: the absolute `dir` written, whether `doctor`
+   * found no errors (`ok`), and the doctor `problems` (warnings included). On a
+   * write/validation failure, `ok` is false and `error` explains it.
+   */
+  | { type: "definition_saved"; ok: boolean; dir: string; problems: DoctorProblem[]; error?: string };
 
 export interface SidecarHandle {
   /** Ephemeral loopback port the WS server is listening on. */
@@ -108,6 +124,53 @@ function isSetCredential(value: unknown): value is Extract<ClientMessage, { type
     (value as { type?: unknown }).type === "set_credential" &&
     typeof (value as { secret?: unknown }).secret === "string"
   );
+}
+
+function isSaveDefinition(value: unknown): value is Extract<ClientMessage, { type: "save_definition" }> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { type?: unknown }).type === "save_definition" &&
+    typeof (value as { name?: unknown }).name === "string" &&
+    typeof (value as { systemPrompt?: unknown }).systemPrompt === "string"
+  );
+}
+
+export interface SaveDefinitionResult {
+  ok: boolean;
+  dir: string;
+  problems: DoctorProblem[];
+  error?: string;
+}
+
+/**
+ * Persist a builder-authored definition under `baseDir/<safe-name>` and doctor
+ * it. The name is sanitized to `[a-z0-9-]` (so a hostile client can't traverse
+ * out of `baseDir`), the files are written via `writeHarnessDefinition`
+ * (fail-closed on an invalid manifest), and `doctor` gives the verdict. Pure and
+ * testable — no WebSocket, no file dialog.
+ */
+export async function saveDefinition(
+  input: { name: string; manifest: unknown; policy?: unknown; systemPrompt: string },
+  opts: { baseDir: string },
+): Promise<SaveDefinitionResult> {
+  const safe = input.name.trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
+  if (!safe) {
+    return { ok: false, dir: "", problems: [], error: "a valid name (lowercase letters, digits, hyphens) is required" };
+  }
+  const dir = join(opts.baseDir, safe);
+  try {
+    await writeHarnessDefinition(dir, {
+      manifest: input.manifest,
+      ...(input.policy !== undefined ? { policy: input.policy } : {}),
+      systemPrompt: input.systemPrompt,
+    });
+  } catch (e) {
+    const error = e instanceof MaterializeError ? e.message : ((e as Error)?.message ?? "failed to write definition");
+    return { ok: false, dir, problems: [], error };
+  }
+  const report = await runDoctor(dir);
+  return { ok: report.ok, dir, problems: report.problems };
 }
 
 function send(socket: WebSocket, message: ServerMessage): void {
@@ -320,6 +383,27 @@ export async function startSidecar(opts: StartSidecarOptions): Promise<SidecarHa
             }
           })
           .catch(() => send(socket, needsSetup("failed to save the key")));
+        return;
+      }
+
+      // A definition authored in the visual builder: persist it under the app's
+      // config dir and doctor it, then report the outcome. Independent of session
+      // readiness — you can author a harness even before this one is configured.
+      if (isSaveDefinition(parsed)) {
+        void saveDefinition(
+          { name: parsed.name, manifest: parsed.manifest, policy: parsed.policy, systemPrompt: parsed.systemPrompt },
+          { baseDir: join(configDir(), "definitions") },
+        )
+          .then((result) => send(socket, { type: "definition_saved", ...result }))
+          .catch((e: unknown) =>
+            send(socket, {
+              type: "definition_saved",
+              ok: false,
+              dir: "",
+              problems: [],
+              error: (e as Error)?.message ?? "save failed",
+            }),
+          );
         return;
       }
       // A human's answer to an outstanding `ask`. Correlate by id; an answer

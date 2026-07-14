@@ -35,7 +35,25 @@ export type ServerMessage =
    * A credential is now in place (after `set_credential`): leave the onboarding
    * panel and enable chat. Sent by the sidecar once an account resolves.
    */
-  | { type: "ready" };
+  | { type: "ready" }
+  /**
+   * Result of a visual-builder `save_definition`: the directory written, whether
+   * `doctor` passed (`ok`), its `problems`, and an `error` on a write failure.
+   */
+  | { type: "definition_saved"; ok: boolean; dir: string; problems: SaveProblem[]; error?: string };
+
+export interface SaveProblem {
+  level: "error" | "warn";
+  code: string;
+  message: string;
+}
+
+export interface SaveResult {
+  ok: boolean;
+  dir: string;
+  problems: SaveProblem[];
+  error?: string;
+}
 
 export type ChatRole = "user" | "assistant";
 
@@ -90,6 +108,8 @@ export interface ChatState {
    * needs a key, where config lives, and any wrong-key error). Cleared on `ready`.
    */
   setup?: SetupState;
+  /** The most recent visual-builder save outcome (from `definition_saved`). */
+  saveResult?: SaveResult;
 }
 
 export type ChatAction =
@@ -242,6 +262,13 @@ function applyServerEvent(state: ChatState, event: ServerMessage): ChatState {
       // A credential is now in place: leave onboarding, enable chat.
       return { ...state, status: "idle", setup: undefined };
     }
+
+    case "definition_saved": {
+      // A visual-builder save came back: record the outcome for the panel. Does
+      // not touch chat status — authoring is orthogonal to the conversation.
+      const { type: _t, ...result } = event;
+      return { ...state, saveResult: result };
+    }
   }
 }
 
@@ -305,6 +332,10 @@ export interface UseChat {
    * sidecar replies with `ready` (chat enabled) or `needs_setup` with an error.
    */
   submitCredential: (secret: string) => void;
+  /** Persist a visual-builder definition via the sidecar (no-op until connected). */
+  saveDefinition: (input: { name: string; manifest: unknown; policy?: unknown; systemPrompt: string }) => void;
+  /** The most recent save outcome, once a `definition_saved` frame has arrived. */
+  saveResult?: SaveResult;
 }
 
 /**
@@ -361,6 +392,15 @@ export function useChat(connection: Connection | null): UseChat {
     socket.send(JSON.stringify({ type: "set_credential", secret }));
   }, []);
 
+  const saveDefinition = useCallback(
+    (input: { name: string; manifest: unknown; policy?: unknown; systemPrompt: string }) => {
+      const socket = socketRef.current;
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+      socket.send(JSON.stringify({ type: "save_definition", ...input }));
+    },
+    [],
+  );
+
   const answerAsk = useCallback((id: string, approved: boolean) => {
     // No-op if `id` is not the currently-surfaced ask (stale, already settled,
     // or cancelled by the server): never dequeue or answer the wrong ask.
@@ -382,8 +422,10 @@ export function useChat(connection: Connection | null): UseChat {
     send,
     answerAsk,
     submitCredential,
+    saveDefinition,
     ...(state.integrityMessage !== undefined ? { integrityMessage: state.integrityMessage } : {}),
     ...(head !== undefined ? { pendingAsk: head } : {}),
     ...(state.setup !== undefined ? { setup: state.setup } : {}),
+    ...(state.saveResult !== undefined ? { saveResult: state.saveResult } : {}),
   };
 }

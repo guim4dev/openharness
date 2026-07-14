@@ -268,8 +268,19 @@ function SetupPanel({
 
 export function App() {
   const connection = useMemo(readConnection, []);
-  const { messages, status, connected, send, integrityMessage, pendingAsk, answerAsk, setup, submitCredential } =
-    useChat(connection);
+  const {
+    messages,
+    status,
+    connected,
+    send,
+    integrityMessage,
+    pendingAsk,
+    answerAsk,
+    setup,
+    submitCredential,
+    saveDefinition,
+    saveResult,
+  } = useChat(connection);
   const [draft, setDraft] = useState("");
   const [view, setView] = useState<"chat" | "builder">("chat");
   const listRef = useRef<HTMLDivElement>(null);
@@ -291,7 +302,14 @@ export function App() {
 
   // Authoring mode: the visual harness builder takes over the window.
   if (view === "builder") {
-    return <BuilderPanel onClose={() => setView("chat")} />;
+    return (
+      <BuilderPanel
+        onClose={() => setView("chat")}
+        onSave={saveDefinition}
+        canSave={connected}
+        {...(saveResult !== undefined ? { saveResult } : {})}
+      />
+    );
   }
 
   const streaming = status === "streaming";

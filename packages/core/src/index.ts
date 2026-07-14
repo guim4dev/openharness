@@ -7,6 +7,8 @@ export { createLiveSession } from "./live-session.ts";
 export type { LiveSession, LiveSessionEvent, CreateLiveSessionOptions } from "./live-session.ts";
 export { loadGatewayTools } from "./gateway-bridge.ts";
 export type { GatewayAuth, LoadGatewayToolsOptions, LoadGatewayToolsResult } from "./gateway-bridge.ts";
+export { runDoctor } from "./doctor.ts";
+export type { DoctorReport, DoctorProblem, DoctorLevel, RunDoctorOptions } from "./doctor.ts";
 export { buildPolicyExtension } from "./policy-extension.ts";
 export type { PolicyExtensionOptions } from "./policy-extension.ts";
 export { checkModel } from "@openharness/policy";
