@@ -2,6 +2,14 @@
 
 **Build your own AI harness. Own it end to end.**
 
+[![CI](https://github.com/guim4dev/openharness/actions/workflows/ci.yml/badge.svg)](https://github.com/guim4dev/openharness/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Node](https://img.shields.io/badge/node-%E2%89%A522.19-3c873a.svg)
+
+> A company's own governed AI harness — one definition, shipped as a TUI **and** a
+> signed desktop app that refuses config it can't verify. Self-hosted, open source.
+> **Landing:** [`site/index.html`](site/index.html) · **Try it:** [`docs/DEMO.md`](docs/DEMO.md)
+
 OpenHarness is an open-source platform that lets a company define its own custom
 AI agent harness — the prompts, skills, tools (MCP), permission policies,
 credentials, and branding — once, and ship it to its people as **both a terminal
