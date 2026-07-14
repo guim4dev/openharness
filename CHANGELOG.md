@@ -7,7 +7,7 @@ All notable changes to OpenHarness. This project adheres to
 ## [Unreleased] — 2026-07-14 (initial build)
 
 The first end-to-end build: a company can define its own harness and ship it,
-governed and signed, to a TUI and a desktop app. 329 tests, MIT, built on
+governed and signed, to a TUI and a desktop app. 336 tests, MIT, built on
 [Pi](https://pi.dev).
 
 ### Added
@@ -64,8 +64,14 @@ governed and signed, to a TUI and a desktop app. 329 tests, MIT, built on
   pinned tools into the agent as `mcp__<gateway>__<tool>`, fail-closed at boot
   when a declared gateway is unreachable. Proven over real loopback HTTP.
   Connector/broker sit behind swappable interfaces (an OpenConnector backend can
-  slot in later). Deploy hardening (real IdP/token-exchange, KMS-backed broker,
-  containerized connector sandbox) remains.
+  slot in later). An adversarial review of the transport then closed three real
+  holes: DPoP proofs are single-use (a captured proof can't be replayed — random
+  `jti` + a server-side replay guard, 60s window); the pinned server `pubkey` is
+  enforced (the client verifies a per-request gateway signature and requires TLS
+  off-loopback, so a fake gateway is refused); and the HTTP entry contains
+  per-request failures rather than crashing the shared server. Deploy hardening
+  (real IdP/token-exchange, KMS-backed broker, containerized connector sandbox)
+  remains.
 - **Example harnesses** — `acme-fintech` (deny-by-default, AWS-key redaction),
   `northwind-ops` (ask-on-writes, PII redaction), and `meridian-support` (the
   non-technical desktop operator: `bash` denied, ask-on-every-write, heavy PII

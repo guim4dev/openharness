@@ -10,11 +10,16 @@ Last updated: 2026-07-14 (after an autonomous build night).
 
 ## 0. Current state (what's actually built)
 
-On `main`, **329 tests green**, typecheck + `cargo check` green. A cross-cutting
+On `main`, **336 tests green**, typecheck + `cargo check` green. A cross-cutting
 integration test proves MCP + policy + audit compose end-to-end in one live
-session, and an adversarial review pass hardened the security claims (honest
+session, and adversarial review passes hardened the security claims (honest
 audit-integrity framing + server-side chain verification, policy fails loud on a
-malformed rule, constant-time token). Packages/apps:
+malformed rule, constant-time token). A dedicated review of the v2 gateway
+transport then closed three real holes: DPoP proofs are now single-use
+(anti-replay), the pinned server `pubkey` is actually enforced (the client
+verifies a per-request server signature + requires TLS off-loopback), and the
+HTTP entry contains per-request failures instead of crashing the shared server.
+Packages/apps:
 
 - **`@openharness/definition`** — HarnessDefinition (dir + `harness.json` + optional
   `policy.json` + `mcp` section), zod-validated, fail-fast loader. `systemPrompt`/
