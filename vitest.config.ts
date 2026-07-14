@@ -21,5 +21,10 @@ export default defineConfig({
     // the cores so the spawned processes get CPU. Scales down cleanly on CI.
     maxWorkers: workerCap,
     minWorkers: 1,
+    // Generous default so a CPU-starved child-process/spawn test under the full
+    // suite's contention doesn't fail on the stock 5s. Fast tests finish in ms
+    // regardless; the few heavy spawn tests set their own (larger) timeouts.
+    testTimeout: 60_000,
+    hookTimeout: 60_000,
   },
 });

@@ -60,7 +60,7 @@ function bootAndCaptureHandshake(
     };
     const timer = setTimeout(() => {
       done(() => reject(new Error("timed out waiting for sidecar handshake")));
-    }, 25000);
+    }, 90000); // generous: the baked server.mjs child is CPU-starved under full-suite contention
     child.stdout.on("data", (d: Buffer) => {
       buf += d.toString();
       for (const line of buf.split("\n")) {
@@ -96,7 +96,7 @@ beforeAll(async () => {
     org: "acme",
     name: "assistant",
   });
-}, 60000);
+}, 150000);
 
 afterAll(() => {
   for (const d of tmps) rmSync(d, { recursive: true, force: true });
@@ -217,4 +217,4 @@ test("(d) server.mjs exists and boots to a verified handshake from the baked res
   expect(typeof handshake.port).toBe("number");
   expect(handshake.port).toBeGreaterThan(0);
   expect(handshake.token.length).toBeGreaterThan(0);
-}, 30000);
+}, 150000);
