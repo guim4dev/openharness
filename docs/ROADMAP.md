@@ -128,7 +128,11 @@ questions a human must answer first) is in
   update that silently BCC'd every sent email) and the wave of path-traversal /
   argument-injection CVEs in copied reference servers make this concrete: pin
   MCP servers by digest, optionally require server attestation, and make the
-  policy layer first-class over `mcp__*` egress.
+  policy layer first-class over `mcp__*` egress. ✓ Started: `doctor` flags any
+  MCP server fetched unpinned on launch across npm/PyPI/container runners
+  (containers pinned only by an `@sha256:` digest), and `--strict-supply-chain`
+  turns that into a build-failing gate. Remaining: server attestation, and
+  policy-layer defaults over `mcp__*` egress.
 
 ## v3 — reach
 

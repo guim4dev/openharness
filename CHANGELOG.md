@@ -7,7 +7,7 @@ All notable changes to OpenHarness. This project adheres to
 ## [Unreleased] — 2026-07-14 (initial build)
 
 The first end-to-end build: a company can define its own harness and ship it,
-governed and signed, to a TUI and a desktop app. 350 tests, MIT, built on
+governed and signed, to a TUI and a desktop app. 352 tests, MIT, built on
 [Pi](https://pi.dev).
 
 ### Added
@@ -86,11 +86,14 @@ governed and signed, to a TUI and a desktop app. 350 tests, MIT, built on
   of the loader's structural/reference validation it flags self-consistency
   traps (a model the harness's own policy denies, a missing branding icon, an
   MCP secret in the reserved `api-key:*` namespace, default-deny with no allow
-  rule, a mandatory MCP server whose every tool is denied, an unpinned `npx` MCP
-  server that would fetch "latest" each launch — a supply-chain risk). Warnings pass;
-  error-level problems exit non-zero. `openharness build` runs doctor as a
-  preflight and refuses to build on any error, so a broken definition never
-  ships as a bundle. CI gates every example harness on a clean doctor run.
+  rule, a mandatory MCP server whose every tool is denied, and any MCP server
+  fetched unpinned on launch — across npm (`npx`/`bunx`/`pnpm dlx`/`yarn dlx`),
+  PyPI (`uvx`/`uv`), and containers (`docker`/`podman run`, pinned only by an
+  `@sha256:` digest since a tag is mutable) — the Postmark-MCP supply-chain risk).
+  Warnings pass; error-level problems exit non-zero, and `--strict-supply-chain`
+  escalates unpinned servers to errors for a CI gate. `openharness build` runs
+  doctor as a preflight and refuses to build on any error, so a broken definition
+  never ships as a bundle. CI gates every example harness on a clean doctor run.
 - **BYO-key** — API keys, gateway subscriptions (OpenCode Go), multi-account rotation.
 - **Project** — MIT `LICENSE` + `NOTICE`, a full docs suite (`README`, `ARCHITECTURE`,
   `AUTHORING`, `DEMO`, `ROADMAP`, `vision`, `SECURITY`, `CONTRIBUTING`, `CODE_OF_CONDUCT`,
