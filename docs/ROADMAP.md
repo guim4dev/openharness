@@ -58,8 +58,10 @@ everyone else. Before we lean on that claim we should exercise it.
   sidecar emits a recoverable `needs_setup` and the app shows a paste-a-key panel
   (written to the machine-local encrypted store over the loopback sidecar, never
   leaving the machine); `set_credential` → `ready` enables chat with no restart.
-  Fail-closed on a blank key. (The in-app key is session-scoped for now — durable
-  persistence across restart, and provider OAuth subscriptions, are follow-ups.)
+  Fail-closed on a blank key. The key **survives a restart** — the secret stays
+  in the encrypted store and a keyless `accounts.json` reference is persisted,
+  resolved by `loadAccounts` next launch. (Provider OAuth subscriptions remain a
+  follow-up.)
 
 ## v2 — the remote MCP gateway (the moat)
 

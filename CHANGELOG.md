@@ -43,7 +43,10 @@ governed and signed, to a TUI and a desktop app. 254 tests, MIT, built on
   over the loopback, token-gated sidecar socket and is written to the machine-local
   encrypted store (`CredentialManager.addAccount`); `set_credential` → `ready`
   enables chat with no restart. Fail-closed on a blank key; never logged, never
-  leaves the machine.
+  leaves the machine. The key **survives a restart**: a keyless `accounts.json`
+  entry (`persistOnboardedAccount`) references the stored secret, which
+  `loadAccounts` resolves on the next launch — so `accounts.json` never holds
+  raw key material.
 - **Example harnesses** — `acme-fintech` (deny-by-default, AWS-key redaction),
   `northwind-ops` (ask-on-writes, PII redaction), and `meridian-support` (the
   non-technical desktop operator: `bash` denied, ask-on-every-write, heavy PII
