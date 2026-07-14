@@ -47,9 +47,9 @@ acme id     : ai.openharness.acme.engineer      (branding.displayName: "Acme Eng
 northwind id: ai.openharness.northwind.ops       (branding.displayName: "Northwind Ops Copilot")
 ```
 
-Each bakes exactly three resources — `harness.ohbundle` (the signed definition),
-`org.pub` (the org's public key), `server.mjs` (the single-file agent sidecar) —
-and **never** the private key:
+Each bakes four resources — `harness.ohbundle` (the signed definition),
+`org.pub` (the org's public key), `min-version.txt` (the anti-rollback floor),
+`server.mjs` (the single-file agent sidecar) — and **never** the private key:
 
 ```bash
 grep -rl "PRIVATE KEY" "$OUT/acme" "$OUT/northwind"   # → (no output: no key is ever baked)
@@ -78,7 +78,10 @@ could not be verified" screen instead of running.
 ## 4. The memory hook: flip one byte → the app refuses
 
 ```bash
-# tamper a single byte inside the baked bundle, then re-verify:
+# flip a single byte inside the baked bundle:
+node -e 'const fs=require("fs"),p=process.argv[1],b=fs.readFileSync(p);b[Math.floor(b.length/2)]^=1;fs.writeFileSync(p,b)' "$OUT/acme/resources/harness.ohbundle"
+
+# ...then re-verify — it no longer matches the org's signature:
 $TSX bundle verify "$OUT/acme/resources/harness.ohbundle" --pubkey "$OUT/org.pub"
 # → bundle REJECTED: signature verification failed — bundle is unsigned, tampered, or signed by a different key
 ```
@@ -128,8 +131,11 @@ of bug that hides until a real install.
   **evidence** for the audit trail comes from shipping entries to the server,
   which retains a per-source HEAD and rejects re-chained/forked/gapped
   submissions; the server's retained copy is the anchor. The future remote MCP
-  gateway (org secrets server-side) makes bypass **pointless** — no gateway
-  token, no access, the credential never touched the laptop.
+  gateway (org secrets server-side) doesn't make bypass *pointless* — a patched
+  binary still holds a valid session — but it **confines and audits the blast
+  radius**: the credential never touches the laptop, so a compromised endpoint
+  means abuse limited to one user's policy scope and revocable in one place, not
+  stolen org secrets used invisibly. (Design: `specs/2026-07-14-remote-mcp-gateway-design.md`.)
 - Until OS code-signing seals the app bundle, the *definition* integrity is
   verified but the shell still trusts whatever sidecar binary sits next to it
   (*code* integrity isn't sealed yet). That's the OS-signing follow-up.
