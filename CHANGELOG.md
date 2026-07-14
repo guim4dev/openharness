@@ -7,7 +7,7 @@ All notable changes to OpenHarness. This project adheres to
 ## [Unreleased] — 2026-07-14 (initial build)
 
 The first end-to-end build: a company can define its own harness and ship it,
-governed and signed, to a TUI and a desktop app. 344 tests, MIT, built on
+governed and signed, to a TUI and a desktop app. 350 tests, MIT, built on
 [Pi](https://pi.dev).
 
 ### Added
@@ -28,7 +28,10 @@ governed and signed, to a TUI and a desktop app. 344 tests, MIT, built on
     and results), model allow/deny, and argument-matching (`tool(*GLOB*)`) against a
     canonical arg string for any tool; enforced in-process via Pi hooks.
   - `@openharness/audit` — hash-chained JSONL, external calls only (never prompts);
-    the server retains the authoritative, continuity-checked record.
+    the server retains the authoritative, continuity-checked record. `exportAuditLog`
+    / `openharness audit export` produce a compliance bundle for SIEM/retention:
+    filtered records + an integrity manifest (chain verified + head hash), gating
+    on integrity.
   - `@openharness/bundle` — ed25519-signed `.ohbundle` definition bundles;
     `verifyBundle` / `loadVerifiedDefinition`, fail-closed and path-traversal-safe.
   - `@openharness/server` — thin `GET /bundle` + `POST /audit`, bearer-gated, loopback.

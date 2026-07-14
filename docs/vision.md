@@ -10,7 +10,7 @@ Last updated: 2026-07-14 (after an autonomous build night).
 
 ## 0. Current state (what's actually built)
 
-On `main`, **344 tests green**, typecheck + `cargo check` green. A cross-cutting
+On `main`, **350 tests green**, typecheck + `cargo check` green. A cross-cutting
 integration test proves MCP + policy + audit compose end-to-end in one live
 session, and adversarial review passes hardened the security claims (honest
 audit-integrity framing + server-side chain verification, policy fails loud on a
@@ -43,6 +43,9 @@ Packages/apps:
   emitted from the same code path as enforcement; `verifyAuditLog` catches accidental
   corruption + naive edits (keyless/genesis-anchored — the server's retained per-source
   HEAD is the real tamper-evidence anchor, rejecting re-chained/forked/gapped pushes).
+  `exportAuditLog` (+ `openharness audit export`) produces a compliance bundle for
+  SIEM/retention: filtered records plus an integrity manifest (chain verified + head
+  hash), exiting nonzero when integrity fails so a pipeline can gate on it.
 - **`@openharness/bundle`** — ed25519-signed `.ohbundle` definition bundles;
   `verifyBundle`/`loadVerifiedDefinition` (fail-closed, path-traversal-safe).
 - **`@openharness/server`** — thin `GET /bundle` + `POST /audit`, bearer-gated, loopback.

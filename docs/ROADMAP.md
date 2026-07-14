@@ -108,6 +108,8 @@ constrained by them rather than discovering them later:
   least-privilege, scoped per upstream.
 - **A compliance/export API** so the authoritative audit stream feeds existing
   SIEM / retention systems — the integration regulated buyers actually ask for.
+  ✓ Built: `exportAuditLog` / `openharness audit export` emit filtered records
+  plus an integrity manifest (chain verified + head hash), gating on integrity.
 
 Boundary work lands with it: transport, storage bind, endpoint auth, which
 credentials it carries, and who can reach it — with the gateway's URL and public
