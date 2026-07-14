@@ -10,7 +10,11 @@ Last updated: 2026-07-14 (after an autonomous build night).
 
 ## 0. Current state (what's actually built)
 
-On `main`, **139 tests green**, typecheck + `cargo check` green. Packages/apps:
+On `main`, **149 tests green**, typecheck + `cargo check` green. A cross-cutting
+integration test proves MCP + policy + audit compose end-to-end in one live
+session, and an adversarial review pass hardened the security claims (honest
+audit-integrity framing + server-side chain verification, policy fails loud on a
+malformed rule, constant-time token). Packages/apps:
 
 - **`@openharness/definition`** — HarnessDefinition (dir + `harness.json` + optional
   `policy.json` + `mcp` section), zod-validated, fail-fast loader.
