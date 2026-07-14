@@ -65,9 +65,17 @@ function bootServerTs(
       cwd: tmp,
       env: {
         ...process.env,
-        XDG_CONFIG_HOME: join(tmp, "config"), // hermetic: never read/write the real machine's accounts
+        // Hermetic: OPENHARNESS_DIR is the full, cross-platform config-dir
+        // override (configDir() honors it on every OS; XDG_CONFIG_HOME is only
+        // consulted on Linux, so on macOS the child would otherwise read/write
+        // the real ~/Library config). Clear ALL provider keys so the child's
+        // loadAccounts resolves NO account (the onboarding path needs that).
+        OPENHARNESS_DIR: join(tmp, "config"),
+        XDG_CONFIG_HOME: join(tmp, "config"),
         ANTHROPIC_API_KEY: "",
         OPENAI_API_KEY: "",
+        GEMINI_API_KEY: "",
+        OPENCODE_GO_API_KEY: "",
         ...extraEnv,
       },
       stdio: ["pipe", "pipe", "inherit"],
