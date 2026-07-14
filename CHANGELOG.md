@@ -16,7 +16,8 @@ governed and signed, to a TUI and a desktop app. 245 tests, MIT, built on
   + optional `policy.json` + `mcp` section, zod-validated), `@openharness/core`
   (`createLiveSession` drives a real in-process Pi session and streams tokens;
   cross-platform per-identifier paths; `loadAccounts` BYO-key; the
-  `openharness chat / init / doctor / keygen / bundle / build / serve` CLI).
+  `openharness chat / init / doctor / keygen / bundle / build / serve` CLI, with
+  a top-level `--help` listing every subcommand).
 - **Two frontends from one definition** — `apps/tui` (branded Pi InteractiveMode) and
   `apps/desktop` (Tauri v2 shell + React chat + Node WS sidecar), sharing one core.
 - **Governance data plane**
@@ -49,8 +50,10 @@ governed and signed, to a TUI and a desktop app. 245 tests, MIT, built on
   preflight and refuses to build on any error, so a broken definition never
   ships as a bundle. CI gates every example harness on a clean doctor run.
 - **BYO-key** — API keys, gateway subscriptions (OpenCode Go), multi-account rotation.
-- **Project** — MIT `LICENSE` + `NOTICE`, `CONTRIBUTING`, a landing page (GitHub Pages),
-  CI (Node 22: test + typecheck), and issue/PR templates.
+- **Project** — MIT `LICENSE` + `NOTICE`, a full docs suite (`README`, `ARCHITECTURE`,
+  `AUTHORING`, `DEMO`, `ROADMAP`, `vision`, `SECURITY`, `CONTRIBUTING`, `CODE_OF_CONDUCT`,
+  `CHANGELOG`), a landing page (GitHub Pages), CI (test + typecheck + a `doctor` gate over
+  every example harness), `.nvmrc` + `.editorconfig`, and issue/PR templates.
 
 ### Security
 
@@ -84,3 +87,5 @@ governed and signed, to a TUI and a desktop app. 245 tests, MIT, built on
 
 Final `tauri build` + fresh-account validation (manual), OS code-signing, remote
 MCP gateway + governed credential pooling, a visual builder, the managed cloud.
+Design proposals for the two next milestones — v1.1 desktop onboarding and the
+v2 remote MCP gateway — are in [`docs/specs/`](docs/specs).
