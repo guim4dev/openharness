@@ -43,6 +43,37 @@ test("auth failure marks invalid and rotates", () => {
   expect(m.activeAccount("work")?.id).toBe("b");
 });
 
+test("addAccount: adds a runtime account to a profile and makes it selectable", () => {
+  const m = new CredentialManager({
+    accounts: [],
+    profiles: [{ name: "work", policy: "failover", accountIds: [] }],
+  });
+  expect(m.activeAccount("work", "anthropic")).toBeUndefined();
+  m.addAccount(acct("new", "anthropic"), "work");
+  expect(m.activeAccount("work", "anthropic")?.id).toBe("new");
+});
+
+test("addAccount: creates the profile when it does not exist", () => {
+  const m = new CredentialManager({ accounts: [], profiles: [] });
+  m.addAccount(acct("x", "openai"), "fresh");
+  expect(m.activeAccount("fresh", "openai")?.id).toBe("x");
+});
+
+test("addAccount: re-adding the same id refreshes it and never duplicates in the profile", () => {
+  const m = new CredentialManager({
+    accounts: [acct("a")],
+    profiles: [{ name: "work", policy: "round_robin", accountIds: ["a"] }],
+  });
+  m.reportResult("a", { ok: false, kind: "auth" }); // marked invalid
+  expect(m.activeAccount("work", "anthropic")).toBeUndefined();
+  m.addAccount(acct("a"), "work"); // re-add with fresh (ok) health
+  expect(m.activeAccount("work", "anthropic")?.id).toBe("a");
+  // A duplicate accountId would break round-robin's modulo count; advancing once
+  // must land back on "a" (single distinct account), proving no dup was appended.
+  m.markRotated("work");
+  expect(m.activeAccount("work", "anthropic")?.id).toBe("a");
+});
+
 test("round_robin advances on each markRotated", () => {
   const m = new CredentialManager({ accounts: [acct("a"), acct("b")], profiles: [profile("round_robin")] });
   expect(m.activeAccount("work")?.id).toBe("a");

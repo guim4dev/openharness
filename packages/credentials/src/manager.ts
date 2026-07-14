@@ -1,4 +1,4 @@
-import type { Account, AccountHealth, Profile } from "./types.ts";
+import type { Account, AccountHealth, Profile, RotationPolicy } from "./types.ts";
 
 export type CallResult =
   | { ok: true }
@@ -55,6 +55,25 @@ export class CredentialManager {
       return undefined;
     }
     return ordered.find((a) => matches(a) && this.healthy(a));
+  }
+
+  /**
+   * Add (or refresh) an account at runtime and ensure it is in `profileName`'s
+   * rotation, creating the profile if needed. Used by the desktop onboarding
+   * flow: when a user provides a key in the app, the key is written to the
+   * secret store and the resulting account is registered here so the harness's
+   * provider immediately has a healthy account — no restart. Re-adding an
+   * existing id replaces the account (fresh health) and never duplicates the id
+   * in the profile.
+   */
+  addAccount(account: Account, profileName: string, policy: RotationPolicy = "failover"): void {
+    this.accounts.set(account.id, account);
+    let p = this.profiles.get(profileName);
+    if (!p) {
+      p = { name: profileName, policy, accountIds: [] };
+      this.profiles.set(profileName, p);
+    }
+    if (!p.accountIds.includes(account.id)) p.accountIds.push(account.id);
   }
 
   markRotated(profileName: string): void {
