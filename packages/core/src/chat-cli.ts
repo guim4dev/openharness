@@ -9,6 +9,7 @@ import {
   verifyBundle,
   writeBundle,
 } from "@openharness/bundle";
+import { ScaffoldError, scaffoldHarness } from "@openharness/definition";
 import { createOpenHarnessServer } from "@openharness/server";
 import { runChat } from "./chat.ts";
 
@@ -62,6 +63,36 @@ async function main(): Promise<void> {
     writeFileSync(pubPath, publicKey);
     process.stdout.write(`wrote ${keyPath} (private, 0600) and ${pubPath} (public)\n`);
     process.exit(0);
+  }
+
+  // `openharness init <dir> [--name X] [--display Y] [--provider P] [--model M]`
+  // — scaffold a minimal, valid, offline-safe HarnessDefinition. Refuses to
+  // write into an existing, non-empty dir (never overwrites).
+  if (args[0] === "init") {
+    const dir = args[1];
+    if (!dir || dir.startsWith("--")) {
+      process.stderr.write(
+        "usage: openharness init <dir> [--name <n>] [--display <d>] [--provider <p>] [--model <m>]\n",
+      );
+      process.exit(2);
+    }
+    try {
+      const result = await scaffoldHarness(dir, {
+        name: flag(args, "--name"),
+        displayName: flag(args, "--display"),
+        provider: flag(args, "--provider"),
+        model: flag(args, "--model"),
+      });
+      process.stdout.write(`scaffolded '${result.name}' at ${result.rootDir}\n`);
+      process.stdout.write(`next: npm run chat -- ${dir} "Say hello in one line."\n`);
+      process.exit(0);
+    } catch (e) {
+      if (e instanceof ScaffoldError) {
+        process.stderr.write(`${e.message}\n`);
+        process.exit(1);
+      }
+      throw e;
+    }
   }
 
   if (args[0] === "bundle") {

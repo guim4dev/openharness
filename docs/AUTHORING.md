@@ -4,6 +4,10 @@ A **HarnessDefinition** is a directory. This is everything it can contain and ho
 to ship it. Working examples: [`harnesses/acme-fintech`](../harnesses/acme-fintech),
 [`harnesses/northwind-ops`](../harnesses/northwind-ops).
 
+Starting from scratch? `openharness init my-harness` scaffolds a minimal, valid,
+offline-safe one for you (no `mcp` section, a permissive-but-documented starter
+`policy.json`, one mandatory skill) — see `--help` via the usage line below.
+
 ## Layout
 
 ```
@@ -139,6 +143,7 @@ Reference them: `promptLibrary: "prompts"` + `systemPrompt: "lib:platform-eng-ba
 ## Run & ship
 
 ```bash
+openharness init harnesses/my-harness                  # scaffold a starter definition
 npm run chat -- harnesses/my-harness "do the thing"   # live turn (needs a key)
 openharness keygen --out org                           # org signing key (once)
 openharness build harnesses/my-harness --key org.key --out dist/my --org acme --name eng
