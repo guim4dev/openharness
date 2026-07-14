@@ -101,6 +101,13 @@ LLMs are becoming a commodity. The durable value isn't the model — it's the
 them. OpenHarness owns that layer and stays neutral on which model (or
 subscription, or local runtime) sits underneath.
 
+## Security
+
+Found a vulnerability? See [`SECURITY.md`](SECURITY.md) for how to report it
+privately, the fail-safe invariants the design is held to, and the honest
+threat-model boundaries (local enforcement is debugger-bypassable; OS
+code-signing isn't wired up yet).
+
 ## License
 
 MIT (inherited from Pi). See `LICENSE`.

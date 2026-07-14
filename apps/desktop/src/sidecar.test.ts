@@ -233,6 +233,34 @@ function driveIgnoringAsk(url: string, text: string): Promise<Frame[]> {
   });
 }
 
+/**
+ * Connect, send a prompt, and close the socket in the SAME tick as the send —
+ * before the server can ever emit an `ask` frame. Exercises `askUser`'s "no
+ * client is connected" guard (`if (!socket ...) resolve(false)`) rather than
+ * the in-flight-ask-cancellation path that `driveClosingOnAsk` exercises
+ * (which closes only after already SEEING the `ask` frame).
+ */
+function driveDisconnectBeforeAnyFrame(url: string, text: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(url);
+    const timer = setTimeout(() => {
+      reject(new Error("socket never closed"));
+    }, 10_000);
+    socket.onopen = () => {
+      socket.send(JSON.stringify({ type: "prompt", text }));
+      socket.close();
+    };
+    socket.onclose = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    socket.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error("websocket error before close"));
+    };
+  });
+}
+
 /** Connect, send a prompt, and CLOSE the socket the moment the ask arrives. */
 function driveClosingOnAsk(url: string, text: string): Promise<{ askSeen: boolean }> {
   return new Promise((resolve, reject) => {
@@ -514,6 +542,23 @@ test("policy ask fails closed on disconnect: closing before answering denies the
     // never have run because the only approver disconnected.
     await new Promise((r) => setTimeout(r, 400));
     expect(record.calls).toBe(0);
+  } finally {
+    await sidecar.close();
+  }
+});
+
+test("policy ask fails closed when NO client is connected at ask time: the tool never runs", async () => {
+  const { sidecar, record } = await startAskSidecar({});
+  try {
+    const url = `ws://127.0.0.1:${sidecar.port}?token=${encodeURIComponent(sidecar.token)}`;
+    // Disconnect in the same tick as the prompt send, before any `ask` frame
+    // can reach us — by the time the tool call resolves to a policy `ask`,
+    // there is no connected client for `askUser` to ask.
+    await driveDisconnectBeforeAnyFrame(url, "do the dangerous thing");
+
+    // Give the now-orphaned turn time to run to completion server-side.
+    await new Promise((r) => setTimeout(r, 500));
+    expect(record.calls).toBe(0); // no one to approve -> denied -> the tool never ran
   } finally {
     await sidecar.close();
   }
