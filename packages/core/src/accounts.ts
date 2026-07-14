@@ -37,11 +37,15 @@ export interface LoadedAccounts {
   secretStore: SecretStore;
 }
 
-/** ENV var -> provider mapping, in resolution priority order. */
+/**
+ * ENV var -> provider mapping, in resolution priority order. The `provider`
+ * value is the LLM vendor id a harness resolves against (Pi's KnownProvider),
+ * so GEMINI_API_KEY maps to "google" (Pi's name for Gemini), not "gemini".
+ */
 const ENV_PROVIDERS: { envVar: string; provider: string; baseUrl?: string }[] = [
   { envVar: "ANTHROPIC_API_KEY", provider: "anthropic" },
   { envVar: "OPENAI_API_KEY", provider: "openai" },
-  { envVar: "GEMINI_API_KEY", provider: "gemini" },
+  { envVar: "GEMINI_API_KEY", provider: "google" },
   { envVar: "OPENCODE_GO_API_KEY", provider: "opencode-go", baseUrl: "https://opencode.ai/zen/go/v1" },
 ];
 
@@ -119,6 +123,7 @@ export async function loadAccounts(opts: LoadAccountsOptions = {}): Promise<Load
 
   const addAccount = async (params: {
     id: string;
+    provider: string;
     profile: string;
     label: string;
     apiKey: string;
@@ -133,6 +138,7 @@ export async function loadAccounts(opts: LoadAccountsOptions = {}): Promise<Load
     if (params.baseUrl) credential.baseUrl = params.baseUrl;
     accounts.push({
       id: params.id,
+      provider: params.provider,
       authProviderId: params.authProviderId ?? "api-key",
       label: params.label,
       credential,
@@ -149,6 +155,7 @@ export async function loadAccounts(opts: LoadAccountsOptions = {}): Promise<Load
     if (!key || key.trim() === "") continue;
     await addAccount({
       id: `env-${provider}`,
+      provider,
       profile: profileName,
       label: `${provider} (${envVar})`,
       apiKey: key,
@@ -166,6 +173,7 @@ export async function loadAccounts(opts: LoadAccountsOptions = {}): Promise<Load
         if (!key || key.trim() === "") continue; // unresolved key -> skip account
         await addAccount({
           id: acct.id,
+          provider: acct.provider,
           profile: name,
           label: acct.label ?? `${acct.provider} (${acct.id})`,
           apiKey: key,

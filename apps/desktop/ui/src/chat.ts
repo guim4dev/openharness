@@ -15,6 +15,12 @@ export type ServerMessage =
    */
   | { type: "ask"; id: string; toolName: string; reason?: string }
   /**
+   * The sidecar finished an `ask` WITHOUT our answer (timeout or disconnect):
+   * the tool has already been denied server-side. The UI must drop this ask so
+   * its modal cannot linger and later fire a stale (now-rejected) `ask_response`.
+   */
+  | { type: "ask_cancelled"; id: string; reason?: string }
+  /**
    * Verify-on-boot refusal from the sidecar: the configuration could not be
    * cryptographically verified. Locks the UI — no chat is possible this session.
    */
@@ -52,10 +58,13 @@ export interface ChatState {
    */
   integrityMessage?: string;
   /**
-   * Set while a policy `ask` awaits the user's decision. Drives the approval
-   * modal; cleared by an `answer_ask` action once the user approves or denies.
+   * FIFO queue of policy `ask`s awaiting the user's decision. Only the head is
+   * surfaced (one modal at a time); answering the head reveals the next. Kept as
+   * a queue so a second concurrent ask never overwrites the first. Entries leave
+   * the queue on `answer_ask` (head), `ask_cancelled` (any id, server denied it
+   * out-of-band), or defensively on `done`.
    */
-  pendingAsk?: PendingAsk;
+  pendingAsks: PendingAsk[];
 }
 
 export type ChatAction =
@@ -68,6 +77,7 @@ export const initialChatState: ChatState = {
   messages: [],
   status: "idle",
   seq: 0,
+  pendingAsks: [],
 };
 
 function lastMessage(messages: ChatMessage[]): ChatMessage | undefined {
@@ -112,14 +122,17 @@ function applyServerEvent(state: ChatState, event: ServerMessage): ChatState {
     }
 
     case "done": {
+      // Defensive: a settled turn can have no live ask (asks block the turn),
+      // so clear the queue so no modal can outlive its turn.
       if (last && last.role === "assistant" && last.streaming) {
         return {
           ...state,
           status: "idle",
+          pendingAsks: [],
           messages: replaceLast(state.messages, { ...last, streaming: false }),
         };
       }
-      return { ...state, status: "idle" };
+      return { ...state, status: "idle", pendingAsks: [] };
     }
 
     case "error": {
@@ -155,16 +168,28 @@ function applyServerEvent(state: ChatState, event: ServerMessage): ChatState {
     }
 
     case "ask": {
-      // A tool call is suspended pending the user's approval. Record it so the
-      // UI can raise the modal; the turn's status stays as-is (still streaming).
+      // A tool call is suspended pending the user's approval. Enqueue it (one
+      // modal surfaces at a time); the turn's status stays as-is. A duplicate id
+      // never double-queues.
+      if (state.pendingAsks.some((a) => a.id === event.id)) return state;
       return {
         ...state,
-        pendingAsk: {
-          id: event.id,
-          toolName: event.toolName,
-          ...(event.reason !== undefined ? { reason: event.reason } : {}),
-        },
+        pendingAsks: [
+          ...state.pendingAsks,
+          {
+            id: event.id,
+            toolName: event.toolName,
+            ...(event.reason !== undefined ? { reason: event.reason } : {}),
+          },
+        ],
       };
+    }
+
+    case "ask_cancelled": {
+      // The sidecar denied this ask out-of-band (timeout/disconnect). Drop it
+      // from the queue wherever it sits so its modal cannot linger and later
+      // fire a stale ask_response.
+      return { ...state, pendingAsks: state.pendingAsks.filter((a) => a.id !== event.id) };
     }
 
     case "integrity_error": {
@@ -197,10 +222,12 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case "server":
       return applyServerEvent(state, action.event);
     case "answer_ask": {
-      // Clear the modal once the user has answered THIS ask (ignore stale ids).
-      if (!state.pendingAsk || state.pendingAsk.id !== action.id) return state;
-      const { pendingAsk: _answered, ...rest } = state;
-      return rest;
+      // Answer only the HEAD (the surfaced modal). A non-head id is a no-op, so
+      // a stale answer can never dequeue the wrong ask. Removing the head
+      // reveals the next queued ask.
+      const head = state.pendingAsks[0];
+      if (!head || head.id !== action.id) return state;
+      return { ...state, pendingAsks: state.pendingAsks.slice(1) };
     }
   }
 }
@@ -219,9 +246,12 @@ export interface UseChat {
   send: (text: string) => void;
   /** Set only in the `integrity_error` status: why the configuration was refused. */
   integrityMessage?: string;
-  /** Set while a policy `ask` awaits the user's decision. Drives the approval modal. */
+  /** The currently-surfaced policy `ask` (head of the queue), if any. Drives the modal. */
   pendingAsk?: PendingAsk;
-  /** Answer the pending ask: forwards `ask_response` to the sidecar and clears the modal. */
+  /**
+   * Answer the surfaced ask: forwards `ask_response` to the sidecar and reveals
+   * the next queued ask. No-ops if `id` is not the currently-surfaced ask.
+   */
   answerAsk: (id: string, approved: boolean) => void;
 }
 
@@ -234,6 +264,11 @@ export function useChat(connection: Connection | null): UseChat {
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
   const [connected, setConnected] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
+  // Track the surfaced ask's id so `answerAsk` (a stable callback) can reject a
+  // stale/non-head id without closing over `state`.
+  const headAskIdRef = useRef<string | undefined>(undefined);
+  const head = state.pendingAsks[0];
+  headAskIdRef.current = head?.id;
 
   useEffect(() => {
     if (!connection) return;
@@ -267,9 +302,12 @@ export function useChat(connection: Connection | null): UseChat {
   }, []);
 
   const answerAsk = useCallback((id: string, approved: boolean) => {
-    // Always clear the modal locally. If the socket is gone the sidecar has
-    // already denied this ask (timeout/disconnect), so no answer needs to fly —
-    // fail-closed is preserved either way.
+    // No-op if `id` is not the currently-surfaced ask (stale, already settled,
+    // or cancelled by the server): never dequeue or answer the wrong ask.
+    if (headAskIdRef.current !== id) return;
+    // Advance the queue locally, then forward the answer. If the socket is gone
+    // the sidecar has already denied this ask (timeout/disconnect), so no answer
+    // needs to fly — fail-closed is preserved either way.
     dispatch({ type: "answer_ask", id });
     const socket = socketRef.current;
     if (socket && socket.readyState === WebSocket.OPEN) {
@@ -284,6 +322,6 @@ export function useChat(connection: Connection | null): UseChat {
     send,
     answerAsk,
     ...(state.integrityMessage !== undefined ? { integrityMessage: state.integrityMessage } : {}),
-    ...(state.pendingAsk !== undefined ? { pendingAsk: state.pendingAsk } : {}),
+    ...(head !== undefined ? { pendingAsk: head } : {}),
   };
 }

@@ -45,7 +45,7 @@ export async function runChat(opts: RunChatOptions): Promise<RunChatResult> {
 
   const { manager, registry, secretStore } = await loadAccounts({ profileName: profile, dir, env });
 
-  if (!manager.activeAccount(profile)) {
+  if (!manager.activeAccount(profile, provider.provider)) {
     err(
       `${def.manifest.branding.displayName}: no API key configured for provider ` +
         `'${provider.provider}' (profile '${profile}').\n` +

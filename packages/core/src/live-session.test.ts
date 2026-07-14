@@ -30,6 +30,7 @@ function buildCredentials() {
   const accounts: Account[] = [
     {
       id: "a",
+      provider: "anthropic",
       authProviderId: "api-key",
       label: "a",
       credential: { kind: "api_key", secretRef: "api-key:a" },

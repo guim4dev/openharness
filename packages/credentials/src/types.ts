@@ -20,6 +20,15 @@ export type AccountHealth =
 
 export interface Account {
   id: string;
+  /**
+   * The LLM vendor this account's key is for — e.g. "anthropic" | "openai" |
+   * "google" | "opencode-go". Matches the `providerId` a harness resolves
+   * against, so credential selection is provider-aware: an OpenAI harness never
+   * receives an Anthropic key (cross-vendor secret disclosure). Distinct from
+   * `authProviderId`, which selects the AUTH MECHANISM (api-key vs oauth), not
+   * the vendor.
+   */
+  provider: string;
   authProviderId: string; // e.g. "api-key" | "chatgpt-oauth"
   label: string;
   credential: StoredCredential;

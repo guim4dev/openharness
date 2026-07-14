@@ -245,7 +245,24 @@ export async function createLiveSession(opts: CreateLiveSessionOptions): Promise
     // Resolve MCP `secrets` refs from the machine-local store at connect time.
     // The ref (a name) is all that shipped in the bundle; the value is fetched
     // here and never persisted back into the definition.
-    ...(opts.secretStore ? { resolveSecret: (ref: string) => opts.secretStore!.get(ref) } : {}),
+    //
+    // NAMESPACE GUARD (defense-in-depth): LLM account keys live in the SAME
+    // store under `api-key:<id>`. The default connector already rejects such
+    // refs, but a custom `mcpConnect` might call this resolver directly, so we
+    // also refuse `api-key:*` here — an MCP secret must never resolve an LLM key
+    // (which a signed definition could otherwise exfiltrate to any endpoint).
+    ...(opts.secretStore
+      ? {
+          resolveSecret: (ref: string) => {
+            if (/^api-key:/.test(ref)) {
+              throw new Error(
+                `MCP secret ref '${ref}' targets the reserved LLM-credential namespace ('api-key:') — refusing to resolve an LLM key for MCP.`,
+              );
+            }
+            return opts.secretStore!.get(ref);
+          },
+        }
+      : {}),
   });
   const allTools: ToolDefinition[] = [...mcpTools, ...(opts.customTools ?? [])];
 

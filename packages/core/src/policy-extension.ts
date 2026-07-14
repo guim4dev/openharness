@@ -97,6 +97,25 @@ export function buildPolicyExtension(
     Object.assign(input, redacted);
   }
 
+  /**
+   * Record to the audit sink WITHOUT ever letting a sink failure abort the hook.
+   * Pi's runner wraps each hook in try/catch, so a throw from `record()`
+   * (ENOSPC/EIO/closed fd) would skip the hook's return — and the hook's return
+   * is what applies the block / redaction. Swallowing here keeps the security
+   * outcome (block, redact) authoritative and independent of audit durability.
+   */
+  function safeRecord(entry: Parameters<AuditSink["record"]>[0]): void {
+    if (!audit) return;
+    try {
+      const r = audit.record(entry);
+      if (r && typeof (r as Promise<void>).catch === "function") {
+        (r as Promise<void>).catch((e: unknown) => log(`[openharness/policy] audit record failed: ${String(e)}`));
+      }
+    } catch (e) {
+      log(`[openharness/policy] audit record failed: ${String(e)}`);
+    }
+  }
+
   return {
     name: "openharness-policy",
     factory: (pi) => {
@@ -109,7 +128,7 @@ export function buildPolicyExtension(
         const server = parseMcpServer(event.toolName);
         const ruleId = matchedRuleId(policy, event.toolName, event.input);
         const recordDecision = (auditDecision: ToolDecision): void => {
-          audit?.record({
+          safeRecord({
             type: "tool_call",
             tool: event.toolName,
             ...(server ? { server } : {}),
@@ -169,13 +188,17 @@ export function buildPolicyExtension(
         const content = hasRedactors ? applyRedactors(redactors, event.content) : event.content;
         const details = hasRedactors ? applyRedactors(redactors, event.details) : event.details;
 
+        // Record through safeRecord so a throwing sink can never skip the
+        // redacted return below — otherwise the ORIGINAL unredacted output would
+        // re-enter model context (fail-open). The redacted return is computed
+        // above and applied unconditionally.
         if (audit) {
           const changed =
             hasRedactors &&
             (hashCanonical(event.content) !== hashCanonical(content) ||
               hashCanonical(event.details) !== hashCanonical(details));
           // Fingerprint the REDACTED result — never the raw content/details.
-          audit.record({
+          safeRecord({
             type: "tool_result",
             tool: event.toolName,
             redacted: changed,
@@ -205,10 +228,11 @@ export function buildPolicyExtension(
 
           if (audit) {
             // Record ONLY provider/model + token counts — never the payload's
-            // messages/prompt content.
+            // messages/prompt content. safeRecord so a broken sink never aborts
+            // the request payload return below.
             const tokensIn = finiteNumber(payload?.usage?.input_tokens);
             const tokensOut = finiteNumber(payload?.usage?.output_tokens);
-            audit.record({
+            safeRecord({
               type: "model_request",
               provider: providerId ?? "unknown",
               model: model ?? "unknown",

@@ -39,6 +39,7 @@ async function buildStubCredentials(): Promise<{
   const accounts: Account[] = [
     {
       id: "a",
+      provider: "anthropic",
       authProviderId: "api-key",
       label: "a",
       credential: { kind: "api_key", secretRef: "api-key:a" },
@@ -256,25 +257,20 @@ function driveClosingOnAsk(url: string, text: string): Promise<{ askSeen: boolea
   });
 }
 
-/** Send a single client frame and resolve with the first server frame that comes back. */
-function sendAndAwaitOneFrame(url: string, message: unknown): Promise<Frame> {
+/** Send a client frame, collect EVERY server frame for `windowMs`, then resolve. */
+function collectFramesFor(url: string, message: unknown, windowMs: number): Promise<Frame[]> {
   return new Promise((resolve, reject) => {
+    const frames: Frame[] = [];
     const socket = new WebSocket(url);
-    const timer = setTimeout(() => {
-      socket.close();
-      reject(new Error("timed out waiting for a reply frame"));
-    }, 10_000);
-    socket.onopen = () => socket.send(JSON.stringify(message));
-    socket.onmessage = (event) => {
-      clearTimeout(timer);
-      const frame = JSON.parse(readData(event.data)) as Frame;
-      socket.close();
-      resolve(frame);
+    socket.onopen = () => {
+      socket.send(JSON.stringify(message));
+      setTimeout(() => {
+        socket.close();
+        resolve(frames);
+      }, windowMs);
     };
-    socket.onerror = () => {
-      clearTimeout(timer);
-      reject(new Error("websocket error"));
-    };
+    socket.onmessage = (event) => frames.push(JSON.parse(readData(event.data)) as Frame);
+    socket.onerror = () => reject(new Error("websocket error"));
   });
 }
 
@@ -488,6 +484,25 @@ test("policy ask fails closed on timeout: no answer within askTimeoutMs denies t
   }
 });
 
+test("policy ask timeout emits ask_cancelled with the matching id (frees the UI modal)", async () => {
+  const { sidecar, record } = await startAskSidecar({ askTimeoutMs: 200 });
+  try {
+    const url = `ws://127.0.0.1:${sidecar.port}?token=${encodeURIComponent(sidecar.token)}`;
+    const frames = await driveIgnoringAsk(url, "do the dangerous thing");
+
+    const ask = frames.find((f) => f.type === "ask");
+    const cancelled = frames.find((f) => f.type === "ask_cancelled");
+    expect(ask).toBeDefined();
+    // The server announces the server-side denial so the modal can never orphan.
+    expect(cancelled).toBeDefined();
+    expect(cancelled?.id).toBe(ask?.id);
+    expect(record.calls).toBe(0);
+    expect(frames.at(-1)?.type).toBe("done");
+  } finally {
+    await sidecar.close();
+  }
+});
+
 test("policy ask fails closed on disconnect: closing before answering denies the tool", async () => {
   const { sidecar, record } = await startAskSidecar({});
   try {
@@ -504,17 +519,19 @@ test("policy ask fails closed on disconnect: closing before answering denies the
   }
 });
 
-test("policy ask: an ask_response with no matching pending ask is rejected", async () => {
+test("policy ask: an ask_response with no matching pending ask is a benign no-op (no error frame)", async () => {
   const sidecar = await startStubSidecar();
   try {
     const url = `ws://127.0.0.1:${sidecar.port}?token=${encodeURIComponent(sidecar.token)}`;
-    const frame = await sendAndAwaitOneFrame(url, {
-      type: "ask_response",
-      id: "no-such-id",
-      approved: true,
-    });
-    expect(frame.type).toBe("error");
-    expect(frame.message).toContain("no pending approval");
+    // A stale/settled answer (e.g. from a modal the server already cancelled)
+    // must NOT produce an error bubble — it is simply ignored.
+    const frames = await collectFramesFor(
+      url,
+      { type: "ask_response", id: "no-such-id", approved: true },
+      400,
+    );
+    expect(frames.some((f) => f.type === "error")).toBe(false);
+    expect(frames).toHaveLength(0);
   } finally {
     await sidecar.close();
   }

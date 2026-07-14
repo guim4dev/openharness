@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 import { bundleDefinition, writeBundle } from "@openharness/bundle";
 import { loadHarnessDefinition } from "@openharness/definition";
+import type { HarnessManifest } from "@openharness/definition";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** packages/build/src -> repo root (three levels up). */
@@ -46,6 +47,55 @@ export interface BuildHarnessAppResult {
   bundle: { name: string; version: string };
   /** Resource filenames staged under `<outDir>/resources`. */
   resources: string[];
+}
+
+/**
+ * Fail the build LOUD if the definition references any file/dir OUTSIDE its own
+ * directory. `bundleDefinition` walks ONLY files under `defDir`, so an outside
+ * reference (systemPrompt/appendSystemPrompt file, promptLibrary, a skill dir,
+ * or a project-relative MCP command/arg that escapes via `..`) loads fine on the
+ * author's disk but ships a bundle MISSING those files — the app then breaks at
+ * runtime, silently. Catching it here turns a silent runtime break into a clear
+ * build failure naming the offending path.
+ *
+ * Resolution mirrors `loadHarnessDefinition` (`join(root, value)`), so an
+ * absolute-looking prompt/skill value is treated as root-relative exactly as at
+ * load; only a `..` escape falls outside. MCP `command`/`args` are validated
+ * ONLY when they are project-relative (`./`, `../`): a bare binary name or an
+ * absolute system path is provided by the target machine, not bundled, so it is
+ * intentionally left alone.
+ */
+function assertReferencedPathsInside(defDir: string, manifest: HarnessManifest): void {
+  const root = resolve(defDir);
+  const inside = (value: string): boolean => {
+    const abs = resolve(join(root, value));
+    return abs === root || abs.startsWith(root + sep);
+  };
+  const check = (value: string, field: string): void => {
+    if (!inside(value)) {
+      throw new Error(
+        `buildHarnessApp: ${field} references '${value}', which resolves OUTSIDE the ` +
+          `definition dir (${root}). Only files inside the definition dir are bundled; ` +
+          `referencing a file outside it ships a broken app. Move it inside the definition ` +
+          `dir (or, for a prompt, use a lib: ref into an in-dir promptLibrary).`,
+      );
+    }
+  };
+
+  if (!manifest.systemPrompt.startsWith("lib:")) check(manifest.systemPrompt, "systemPrompt");
+  if (manifest.appendSystemPrompt && !manifest.appendSystemPrompt.startsWith("lib:"))
+    check(manifest.appendSystemPrompt, "appendSystemPrompt");
+  if (manifest.promptLibrary) check(manifest.promptLibrary, "promptLibrary");
+  for (const s of manifest.skills) check(s.path, `skill '${s.path}'`);
+
+  const isRelPathRef = (v: string): boolean =>
+    v.startsWith("./") || v.startsWith("../") || v.startsWith(`.${sep}`) || v.startsWith(`..${sep}`);
+  for (const [name, spec] of Object.entries(manifest.mcp?.servers ?? {})) {
+    if (spec.command && isRelPathRef(spec.command)) check(spec.command, `mcp server '${name}' command`);
+    for (const arg of spec.args ?? []) {
+      if (isRelPathRef(arg)) check(arg, `mcp server '${name}' arg '${arg}'`);
+    }
+  }
 }
 
 /** Sanitize an arbitrary string into one reverse-DNS-safe identifier segment. */
@@ -119,8 +169,10 @@ export async function buildHarnessApp(
   const defDir = resolve(opts.defDir);
   const outDir = resolve(opts.outDir);
 
-  // (a) load the definition for name + branding.
+  // (a) load the definition for name + branding, then FAIL LOUD before doing any
+  //     work if it references files outside its dir (they would not be bundled).
   const def = await loadHarnessDefinition(defDir);
+  assertReferencedPathsInside(defDir, def.manifest);
   const name = opts.name ?? def.manifest.name;
   const org = opts.org ?? "org";
   const identifier = `ai.openharness.${idSegment(org)}.${idSegment(name)}`;

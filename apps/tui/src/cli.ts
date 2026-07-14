@@ -22,7 +22,7 @@ async function main(): Promise<void> {
 
   const { manager, registry } = await loadAccounts({ profileName: p.credentialProfile });
 
-  if (!manager.activeAccount(p.credentialProfile)) {
+  if (!manager.activeAccount(p.credentialProfile, p.provider)) {
     console.log(`${def.manifest.branding.displayName} — no API key configured for provider '${p.provider}' (profile '${p.credentialProfile}').`);
     console.log(`Bring your own key: export ANTHROPIC_API_KEY=sk-... (or OPENAI_API_KEY, GEMINI_API_KEY, OPENCODE_GO_API_KEY), or add ${join(configDir(), "accounts.json")}.`);
     return;
