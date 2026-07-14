@@ -1,6 +1,8 @@
 node_modules/
 dist/
 build/
+# ...but the @openharness/build source package is not a build-output dir.
+!packages/build/
 out/
 *.log
 .DS_Store
