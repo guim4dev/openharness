@@ -40,24 +40,44 @@ test("rejects an empty match", () => {
   );
 });
 
-test("rejects a parameterized match on a non-bash tool (would silently never match)", () => {
-  // A deny written as `mcp__shell__exec(*rm*)` can never fire (only bash exposes
-  // an argument to glob), so it must be rejected at load rather than becoming a
-  // silent no-op that a reader assumes is protecting them.
+test("parameterized arg-matching is now supported for ANY tool (gap #2 closed)", () => {
+  // Previously rejected as a bash-only feature; now these load, matching against
+  // the tool's canonical arg string (case-insensitive).
   expect(() =>
     parsePolicy({ default: "allow", rules: [{ match: "mcp__shell__exec(*rm*)", action: "deny" }] }),
-  ).toThrow(PolicyError);
+  ).not.toThrow();
+  expect(() =>
+    parsePolicy({ default: "allow", rules: [{ match: "mcp__back_office__write_query(*DROP*)", action: "deny" }] }),
+  ).not.toThrow();
   expect(() =>
     parsePolicy({ default: "allow", rules: [{ match: "read(secret *)", action: "deny" }] }),
-  ).toThrow(/argument-matching is only supported for bash/);
+  ).not.toThrow();
 
-  // The supported bash(...) form still loads, as does a plain (unparameterized) glob.
+  // bash(...) and plain (unparameterized) globs still load too.
   expect(() =>
     parsePolicy({ default: "allow", rules: [{ match: "bash(rm -rf *)", action: "deny" }] }),
   ).not.toThrow();
   expect(() =>
     parsePolicy({ default: "allow", rules: [{ match: "mcp__shell__exec", action: "deny" }] }),
   ).not.toThrow();
+});
+
+test("rejects genuinely malformed matches (unbalanced parens, empty tool name)", () => {
+  // Empty tool name: would fall through to a plain tool-name glob and silently
+  // never match (tool names contain no parens) — reject rather than no-op.
+  expect(() =>
+    parsePolicy({ default: "allow", rules: [{ match: "(*DROP*)", action: "deny" }] }),
+  ).toThrow(/malformed/);
+  // Unbalanced parens.
+  expect(() =>
+    parsePolicy({ default: "allow", rules: [{ match: "bash(git *", action: "deny" }] }),
+  ).toThrow(PolicyError);
+  expect(() =>
+    parsePolicy({ default: "allow", rules: [{ match: "mcp__db__query(*DROP*", action: "deny" }] }),
+  ).toThrow(/malformed/);
+  expect(() =>
+    parsePolicy({ default: "allow", rules: [{ match: "bash(git *))", action: "deny" }] }),
+  ).toThrow(PolicyError);
 });
 
 test("schema is exported for external validation", () => {

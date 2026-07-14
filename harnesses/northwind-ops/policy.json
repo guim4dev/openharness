@@ -5,7 +5,14 @@
     { "match": "mcp__back_office__read_query", "action": "allow", "reason": "Read-only queries don't need confirmation." },
     { "match": "mcp__back_office__list_tables", "action": "allow" },
     { "match": "mcp__back_office__describe_table", "action": "allow" },
-    { "match": "mcp__back_office__write_query", "action": "ask", "reason": "Mutating the operations DB is a real customer-facing change — confirm first." },
+
+    { "match": "mcp__back_office__write_query(*DROP*)", "action": "deny", "reason": "Dropping tables/objects is destructive and irreversible — never permitted from the ops copilot." },
+    { "match": "mcp__back_office__write_query(*TRUNCATE*)", "action": "deny", "reason": "TRUNCATE wipes a table with no WHERE guard — never permitted from the ops copilot." },
+    { "match": "mcp__back_office__write_query(*ALTER*)", "action": "deny", "reason": "Schema changes (ALTER) are out of scope for the ops copilot." },
+    { "match": "mcp__back_office__write_query(*DELETE*)", "action": "ask", "reason": "DELETE removes customer-facing rows — confirm the statement first." },
+    { "match": "mcp__back_office__write_query(*UPDATE*)", "action": "ask", "reason": "UPDATE mutates customer-facing rows — confirm the statement first." },
+    { "match": "mcp__back_office__write_query", "action": "ask", "reason": "Any other write to the operations DB is a real customer-facing change — confirm first." },
+
     { "match": "mcp__back_office__append_insight", "action": "ask", "reason": "Recording an insight edits shared state — confirm first." }
   ],
   "models": { "allow": ["anthropic/claude-*", "openai/gpt-5*"] },
