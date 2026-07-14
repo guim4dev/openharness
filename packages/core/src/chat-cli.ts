@@ -180,6 +180,22 @@ async function main(): Promise<void> {
       );
       process.exit(2);
     }
+    // Preflight with doctor: never ship a bundle whose harness can't run its own
+    // model, is missing its icon, or names an LLM key as an MCP secret. Warnings
+    // print but don't block; any error-level problem refuses the build.
+    const pre = await runDoctor(defDir);
+    for (const p of pre.problems) {
+      (p.level === "error" ? process.stderr : process.stdout).write(
+        `  [${p.level === "error" ? "ERROR" : "warn"}] ${p.code}: ${p.message}\n`,
+      );
+    }
+    if (!pre.ok) {
+      const errs = pre.problems.filter((p) => p.level === "error").length;
+      process.stderr.write(
+        `build refused: ${pre.defName ?? defDir} has ${errs} doctor error${errs === 1 ? "" : "s"} — fix them (or run 'openharness doctor ${defDir}') before building.\n`,
+      );
+      process.exit(1);
+    }
     const result = await buildHarnessApp({
       defDir,
       privateKeyPath: keyFile,
