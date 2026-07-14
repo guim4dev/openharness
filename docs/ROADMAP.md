@@ -39,14 +39,18 @@ code-signing is not yet wired. The next milestones close exactly those.
 v1's design target is technical employees (D12), but the desktop GUI exists for
 everyone else. Before we lean on that claim we should exercise it.
 
-- A third example harness aimed at a **non-technical operator** (no `bash`,
-  ask-on-every-write, heavy redaction) — proves the desktop ask-flow and the
-  "everyone else" frontend on a realistic policy, and widens the demo's range.
+- **✓ Shipped** — a third example harness aimed at a **non-technical operator**
+  (`bash` denied, ask-on-every-write, heavy redaction): `harnesses/meridian-support`,
+  which proves the desktop ask-flow and the "everyone else" frontend on a
+  realistic policy and widens the demo's range.
+- **✓ Shipped** — `openharness doctor`: preflight a definition without building
+  it. On top of the loader's structural/reference checks it flags the
+  self-consistency traps the loader doesn't — a model the harness's own policy
+  denies, a missing branding icon, an MCP secret in the reserved `api-key:*`
+  namespace, a default-deny with no allow rule, and a mandatory MCP server whose
+  every tool is denied.
 - First-run desktop onboarding: pick a harness, drop in a key, first turn —
   without touching a terminal.
-- `openharness doctor`: preflight a definition (unresolved prompt/skill/mcp
-  refs, out-of-dir paths, a policy that would deny its own mandatory tools)
-  before build.
 
 ## v2 — the remote MCP gateway (the moat)
 

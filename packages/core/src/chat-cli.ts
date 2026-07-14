@@ -12,6 +12,7 @@ import {
 import { ScaffoldError, scaffoldHarness } from "@openharness/definition";
 import { createOpenHarnessServer } from "@openharness/server";
 import { runChat } from "./chat.ts";
+import { runDoctor } from "./doctor.ts";
 
 /** Value that follows a `--flag` token in argv, or undefined. */
 function flag(args: string[], name: string): string | undefined {
@@ -93,6 +94,34 @@ async function main(): Promise<void> {
       }
       throw e;
     }
+  }
+
+  // `openharness doctor <defDir>` — preflight a definition without building it.
+  // Prints every problem; exits 0 when there are no error-level problems
+  // (warnings still print), else exits 1.
+  if (args[0] === "doctor") {
+    const defDir = args[1];
+    if (!defDir || defDir.startsWith("--")) {
+      process.stderr.write("usage: openharness doctor <defDir>\n");
+      process.exit(2);
+    }
+    const report = await runDoctor(defDir);
+    const errors = report.problems.filter((p) => p.level === "error").length;
+    const warns = report.problems.length - errors;
+    for (const p of report.problems) {
+      const line = `  [${p.level === "error" ? "ERROR" : "warn"}] ${p.code}: ${p.message}\n`;
+      (p.level === "error" ? process.stderr : process.stdout).write(line);
+    }
+    const label = report.defName ?? defDir;
+    const warnSuffix = warns ? ` (${warns} warning${warns === 1 ? "" : "s"})` : "";
+    if (report.ok) {
+      process.stdout.write(`doctor: ${label} OK${warnSuffix}\n`);
+      process.exit(0);
+    }
+    process.stderr.write(
+      `doctor: ${label} has ${errors} error${errors === 1 ? "" : "s"}${warns ? ` and ${warns} warning${warns === 1 ? "" : "s"}` : ""}\n`,
+    );
+    process.exit(1);
   }
 
   if (args[0] === "bundle") {

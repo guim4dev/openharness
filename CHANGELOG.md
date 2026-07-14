@@ -16,7 +16,7 @@ governed and signed, to a TUI and a desktop app. 191 tests, MIT, built on
   + optional `policy.json` + `mcp` section, zod-validated), `@openharness/core`
   (`createLiveSession` drives a real in-process Pi session and streams tokens;
   cross-platform per-identifier paths; `loadAccounts` BYO-key; the
-  `openharness chat / keygen / bundle / build / serve` CLI).
+  `openharness chat / init / doctor / keygen / bundle / build / serve` CLI).
 - **Two frontends from one definition** — `apps/tui` (branded Pi InteractiveMode) and
   `apps/desktop` (Tauri v2 shell + React chat + Node WS sidecar), sharing one core.
 - **Governance data plane**
@@ -40,6 +40,12 @@ governed and signed, to a TUI and a desktop app. 191 tests, MIT, built on
   `northwind-ops` (ask-on-writes, PII redaction), and `meridian-support` (the
   non-technical desktop operator: `bash` denied, ask-on-every-write, heavy PII
   redaction — the example that exercises the desktop approval modal).
+- **`openharness doctor`** — preflight a definition without building it: on top
+  of the loader's structural/reference validation it flags self-consistency
+  traps (a model the harness's own policy denies, a missing branding icon, an
+  MCP secret in the reserved `api-key:*` namespace, default-deny with no allow
+  rule, a mandatory MCP server whose every tool is denied). Warnings pass;
+  error-level problems exit non-zero.
 - **BYO-key** — API keys, gateway subscriptions (OpenCode Go), multi-account rotation.
 - **Project** — MIT `LICENSE` + `NOTICE`, `CONTRIBUTING`, a landing page (GitHub Pages),
   CI (Node 22: test + typecheck), and issue/PR templates.

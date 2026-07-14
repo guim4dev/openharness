@@ -44,7 +44,8 @@ npm run chat -- harnesses/example "Say hello in one line."
 ```
 
 Want your own harness instead of the bundled example? `openharness init my-harness`
-scaffolds a minimal, valid, offline-safe one to start from (see
+scaffolds a minimal, valid, offline-safe one to start from, and
+`openharness doctor my-harness` preflights it before you build (see
 [`docs/AUTHORING.md`](docs/AUTHORING.md)).
 
 Your key is written to an encrypted on-disk store (never logged, never printed).

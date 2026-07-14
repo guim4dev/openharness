@@ -146,6 +146,7 @@ Reference them: `promptLibrary: "prompts"` + `systemPrompt: "lib:platform-eng-ba
 
 ```bash
 openharness init harnesses/my-harness                  # scaffold a starter definition
+openharness doctor harnesses/my-harness                # preflight — catch problems before build
 npm run chat -- harnesses/my-harness "do the thing"   # live turn (needs a key)
 openharness keygen --out org                           # org signing key (once)
 openharness build harnesses/my-harness --key org.key --out dist/my --org acme --name eng
