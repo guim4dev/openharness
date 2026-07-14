@@ -352,3 +352,43 @@ We do **not** fork Omnigent, sit on top of it, or become a meta-harness (D9).
 - Site — https://omnigent.ai · Custom agents — https://omnigent.ai/docs/use/custom-agents
 - GitHub — https://github.com/omnigent-ai/omnigent
 - Databricks blog — https://www.databricks.com/blog/introducing-omnigent-meta-harness-combine-control-and-share-your-agents
+
+## 12. Related work: Odysseus — and why we're a different layer (2026-07-14)
+
+[Odysseus](https://github.com/pewdiepie-archdaemon/odysseus) (PewDiePie's,
+Python backend + JS frontend, Docker Compose, ~82.7k stars) is a **self-hosted,
+single-user AI *workspace***: a monolithic local hub bundling chat, agents, deep
+research, docs, email, calendar, and notes, over **MCP, tools, shell, skills,
+memory, and local/API models**. It's a rich end-user product you run for
+yourself.
+
+**Category difference (the key point).** Odysseus is an opinionated *product for
+one self-hosting individual*; OpenHarness is a domain-agnostic *substrate a
+company brands, governs, and distributes to many employees*. Odysseus has no org
+layer — no deny-by-default policy at the tool seam, no external-call audit, no
+MCP proxy, no credential pooling/rotation, no signed/pinned distribution. It is
+an example of **what a company could build *on* OpenHarness**, not a competitor
+to the substrate; the same primitives (MCP, skills, memory, local models) sit a
+layer below what it assembles.
+
+**What it validates for us:**
+- **Strong demand for self-hosted, OSS, local-first AI** (~82.7k stars) — exactly
+  our positioning; the gap it leaves (multi-employee, governed, brandable,
+  auditable) is our wedge.
+- **The non-technical desktop thesis** — its breadth (email/calendar/docs/research
+  in a GUI) is a catalog of what a rich harness for non-technical users can offer,
+  reinforcing the v1.1 desktop onboarding / GUI direction.
+
+**Anti-lesson (what NOT to copy):**
+- **Monolithic "bundle everything."** Odysseus embeds email/calendar/notes into
+  the product. For us those are *harness content*, never the substrate — keep the
+  core thin and domain-agnostic (same principle as "feature-specific logic lives
+  in the harness, not the core"). A company builds its own Odysseus-shaped harness
+  on top; we don't grow one into the platform.
+- **Model-serving opinion.** Its hardware-aware "Cookbook" picks/serves local
+  models; we stay model-neutral (the bet: models commoditize). A "which
+  model/runtime" helper is a legitimate *harness-author* aid, not core.
+
+### References (Odysseus)
+
+- GitHub — https://github.com/pewdiepie-archdaemon/odysseus
