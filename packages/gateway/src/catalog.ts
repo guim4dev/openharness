@@ -11,6 +11,10 @@ export interface ToolSpec {
   description?: string;
   /** JSON Schema for the tool's arguments. Defaults to an open object. */
   inputSchema?: Record<string, unknown>;
+  /** Which connector backs this tool (routing). */
+  connectorId?: string;
+  /** Which upstream credential the broker resolves for it. Defaults to connectorId. */
+  upstreamId?: string;
 }
 
 export type ToolCatalog = ToolSpec[];
@@ -23,5 +27,7 @@ export function normalizeCatalog(tools: ToolSpec[]): ToolCatalog {
     name: t.name,
     ...(t.description !== undefined ? { description: t.description } : {}),
     inputSchema: t.inputSchema ?? EMPTY_SCHEMA,
+    ...(t.connectorId !== undefined ? { connectorId: t.connectorId } : {}),
+    ...(t.upstreamId !== undefined ? { upstreamId: t.upstreamId } : {}),
   }));
 }
