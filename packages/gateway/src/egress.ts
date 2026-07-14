@@ -9,10 +9,15 @@
 
 /** Is this hostname a private / link-local / loopback / internal target? */
 export function isPrivateHost(host: string): boolean {
-  const h = host.toLowerCase();
+  // WHATWG `URL.hostname` keeps brackets around IPv6 literals — strip them so the
+  // IPv6 checks below actually see `::1` / `fc00::1` rather than `[::1]`.
+  const h = host.toLowerCase().replace(/^\[/, "").replace(/\]$/, "");
   if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".internal") || h.endsWith(".local"))
     return true;
   if (h === "::1" || h.startsWith("fc") || h.startsWith("fd")) return true; // IPv6 loopback / ULA
+  // IPv4-mapped IPv6 (`::ffff:127.0.0.1`): re-check the embedded IPv4 literal.
+  const mapped = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(h);
+  if (mapped) return isPrivateHost(mapped[1]);
   // IPv4 literals in private / loopback / link-local ranges.
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
   if (m) {
@@ -54,6 +59,9 @@ export function tapInjectedField(
   if (Array.isArray(outboundBody)) {
     const s = Array.isArray(sanctionedArgs) ? sanctionedArgs : [];
     for (let i = 0; i < outboundBody.length; i++) {
+      // An element beyond the sanctioned array's length was never authorized —
+      // flag it whether it is a scalar (a smuggled extra recipient) or an object.
+      if (i >= s.length) return `${path}[${i}]`;
       const hit = tapInjectedField(outboundBody[i], s[i], `${path}[${i}]`);
       if (hit) return hit;
     }
@@ -65,7 +73,10 @@ export function tapInjectedField(
   >;
   for (const [k, v] of Object.entries(outboundBody as Record<string, unknown>)) {
     const here = path ? `${path}.${k}` : k;
-    if (!(k in s)) return here; // a field the sanctioned args never had
+    // `Object.hasOwn`, NOT `k in s`: `in` walks the prototype chain, so an
+    // injected key named like an Object.prototype member (`constructor`,
+    // `toString`, `__proto__`, …) would otherwise be treated as sanctioned.
+    if (!Object.hasOwn(s, k)) return here; // a field the sanctioned args never had
     if (v !== null && typeof v === "object") {
       const hit = tapInjectedField(v, s[k], here);
       if (hit) return hit;

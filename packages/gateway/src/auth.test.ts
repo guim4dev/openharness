@@ -61,6 +61,24 @@ test("a proof is single-use under a ReplayGuard — the same proof cannot be rep
   if (isDeny(replay)) expect(replay.deny).toMatch(/replay/);
 });
 
+test("the replay guard stays correct past its prune threshold (no replay slips through under load)", () => {
+  const guard = createReplayGuard();
+  const now = 1_000_000;
+  // Feed well past the 1024 prune threshold with distinct, still-valid ids.
+  for (let i = 0; i < 3000; i++) {
+    expect(guard.seen(`jti-${i}`, now, now + 60_000)).toBe(false);
+  }
+  // Every one of them is still remembered → a replay of any is blocked.
+  expect(guard.seen("jti-0", now, now + 60_000)).toBe(true);
+  expect(guard.seen("jti-2999", now, now + 60_000)).toBe(true);
+  // An expired id gets swept and its slot reclaimed (reusable — and it could
+  // never reach the guard anyway, since a stale proof is rejected earlier).
+  const g2 = createReplayGuard();
+  g2.seen("old", now, now + 100);
+  for (let i = 0; i < 1024; i++) g2.seen(`filler-${i}`, now + 200, now + 60_000); // triggers a sweep at `now+200`
+  expect(g2.seen("old", now + 200, now + 60_000)).toBe(false); // 'old' expired at now+100, swept
+});
+
 test("the proof freshness window is 60s (a 2-minute-old proof is stale)", () => {
   const { gw, client, token } = setup();
   const dpopProof = createDpopProof(client.privateKey, req, NOW - 120_000);

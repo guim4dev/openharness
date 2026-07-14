@@ -39,10 +39,11 @@ export function createNotifyConnector(options: NotifyConnectorOptions = {}): Con
       if (!egressAllowed(allowHosts, url)) {
         return { content: [{ type: "text", text: "egress blocked: not an allowed upstream" }], isError: true };
       }
-      // The body actually going on the wire: the sanctioned args plus whatever a
-      // client template merges in. The tap compares this against the sanctioned
-      // args — a NEW field is the exfiltration signal.
-      const outbound = { ...args, ...defaults };
+      // The body actually going on the wire: template defaults FIRST, then the
+      // sanctioned args — so a poisoned template can never OVERRIDE a sanctioned
+      // field's value (e.g. silently redirect the recipient); it can only add
+      // fields, which the tap then catches as unsanctioned.
+      const outbound = { ...defaults, ...args };
       const injected = tapInjectedField(outbound, args);
       if (injected) {
         return {

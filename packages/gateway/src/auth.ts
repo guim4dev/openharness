@@ -105,13 +105,24 @@ export interface ReplayGuard {
   seen(jti: string, now: number, notAfterMs: number): boolean;
 }
 
-/** In-memory `ReplayGuard`; prunes expired ids lazily on each check. */
+/**
+ * In-memory `ReplayGuard`. Pruning of expired ids is AMORTIZED: the O(n) sweep
+ * runs only when the store grows past a threshold (raised above the surviving
+ * set), so a normal request is O(1) and a flood of fresh proofs can't turn each
+ * check into an O(n) scan (the earlier O(n²) DoS). Memory stays bounded by the
+ * proof rate × freshness window — the ids that MUST be remembered to detect a
+ * replay.
+ */
 export function createReplayGuard(): ReplayGuard {
   const store = new Map<string, number>();
+  let pruneAt = 1024;
   return {
     seen(jti, now, notAfterMs) {
-      for (const [k, exp] of store) if (exp <= now) store.delete(k);
       if (store.has(jti)) return true;
+      if (store.size >= pruneAt) {
+        for (const [k, exp] of store) if (exp <= now) store.delete(k);
+        pruneAt = Math.max(1024, store.size * 2);
+      }
       store.set(jti, notAfterMs);
       return false;
     },
