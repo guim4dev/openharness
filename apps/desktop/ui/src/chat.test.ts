@@ -98,7 +98,7 @@ describe("chatReducer", () => {
       toolName: "danger_tool",
       reason: "danger_tool needs approval",
     });
-    expect(state.pendingAsk).toEqual({
+    expect(state.pendingAsks[0]).toEqual({
       id: "ask-1",
       toolName: "danger_tool",
       reason: "danger_tool needs approval",
@@ -108,24 +108,70 @@ describe("chatReducer", () => {
   test("an ask mid-stream leaves the stream intact", () => {
     let state = feed(initialChatState, { type: "token", text: "thinking" });
     state = feed(state, { type: "ask", id: "ask-2", toolName: "shell" });
-    // The streaming assistant bubble is untouched; only pendingAsk is added.
+    // The streaming assistant bubble is untouched; only the queue head is added.
     expect(state.status).toBe("streaming");
     expect(state.messages.at(-1)?.text).toBe("thinking");
-    expect(state.pendingAsk?.id).toBe("ask-2");
+    expect(state.pendingAsks[0]?.id).toBe("ask-2");
   });
 
-  test("answer_ask clears the pending approval", () => {
+  test("answer_ask clears the head of the pending queue", () => {
     const asked = feed(initialChatState, { type: "ask", id: "ask-3", toolName: "shell" });
-    expect(asked.pendingAsk).toBeDefined();
+    expect(asked.pendingAsks[0]).toBeDefined();
 
     const answered = chatReducer(asked, { type: "answer_ask", id: "ask-3" });
-    expect(answered.pendingAsk).toBeUndefined();
+    expect(answered.pendingAsks).toHaveLength(0);
   });
 
-  test("answer_ask for a stale id is a no-op", () => {
+  test("answer_ask for a non-head id is a no-op", () => {
     const asked = feed(initialChatState, { type: "ask", id: "ask-4", toolName: "shell" });
     const answered = chatReducer(asked, { type: "answer_ask", id: "not-ask-4" });
-    expect(answered.pendingAsk?.id).toBe("ask-4"); // untouched
+    expect(answered.pendingAsks[0]?.id).toBe("ask-4"); // untouched
+  });
+
+  test("ask_cancelled clears the matching pending ask (server denied it out-of-band)", () => {
+    const asked = feed(initialChatState, { type: "ask", id: "ask-5", toolName: "shell" });
+    expect(asked.pendingAsks[0]?.id).toBe("ask-5");
+
+    const cancelled = feed(asked, { type: "ask_cancelled", id: "ask-5", reason: "timeout" });
+    expect(cancelled.pendingAsks).toHaveLength(0);
+  });
+
+  test("done defensively clears any still-pending ask", () => {
+    let state = feed(initialChatState, { type: "token", text: "partial" });
+    state = feed(state, { type: "ask", id: "ask-6", toolName: "shell" });
+    expect(state.pendingAsks).toHaveLength(1);
+
+    state = feed(state, { type: "done" });
+    expect(state.pendingAsks).toHaveLength(0);
+  });
+
+  test("concurrent asks queue and surface one at a time (Finding 5)", () => {
+    let state = feed(
+      initialChatState,
+      { type: "ask", id: "ask-a", toolName: "tool_a" },
+      { type: "ask", id: "ask-b", toolName: "tool_b" },
+    );
+    // Both are queued; the first is surfaced (head), the second waits.
+    expect(state.pendingAsks.map((a) => a.id)).toEqual(["ask-a", "ask-b"]);
+    expect(state.pendingAsks[0]?.id).toBe("ask-a");
+
+    // Answering the head surfaces the next one.
+    state = chatReducer(state, { type: "answer_ask", id: "ask-a" });
+    expect(state.pendingAsks.map((a) => a.id)).toEqual(["ask-b"]);
+    expect(state.pendingAsks[0]?.id).toBe("ask-b");
+
+    // Answering the (now head) second clears the queue.
+    state = chatReducer(state, { type: "answer_ask", id: "ask-b" });
+    expect(state.pendingAsks).toHaveLength(0);
+  });
+
+  test("a duplicate ask id does not double-queue", () => {
+    const state = feed(
+      initialChatState,
+      { type: "ask", id: "dup", toolName: "shell" },
+      { type: "ask", id: "dup", toolName: "shell" },
+    );
+    expect(state.pendingAsks).toHaveLength(1);
   });
 });
 
@@ -221,5 +267,56 @@ describe("useChat", () => {
       JSON.stringify({ type: "ask_response", id: "ask-9", approved: true }),
     );
     expect(result.current.pendingAsk).toBeUndefined();
+  });
+
+  test("surfaces two concurrent asks one at a time; each is answerable in turn", () => {
+    const { result } = renderHook(() => useChat({ port: 4321, token: "secret" }));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.open());
+
+    act(() => {
+      socket.emit({ type: "ask", id: "q1", toolName: "tool_a" });
+      socket.emit({ type: "ask", id: "q2", toolName: "tool_b" });
+    });
+    // Only the first is surfaced.
+    expect(result.current.pendingAsk?.id).toBe("q1");
+
+    act(() => result.current.answerAsk("q1", true));
+    expect(socket.sent).toContain(JSON.stringify({ type: "ask_response", id: "q1", approved: true }));
+    // The second now surfaces and is answerable.
+    expect(result.current.pendingAsk?.id).toBe("q2");
+
+    act(() => result.current.answerAsk("q2", false));
+    expect(socket.sent).toContain(JSON.stringify({ type: "ask_response", id: "q2", approved: false }));
+    expect(result.current.pendingAsk).toBeUndefined();
+  });
+
+  test("answerAsk for a non-head id is a no-op (no ask_response sent)", () => {
+    const { result } = renderHook(() => useChat({ port: 4321, token: "secret" }));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.open());
+
+    act(() => socket.emit({ type: "ask", id: "head", toolName: "tool_a" }));
+    // A stale/settled id must not fire a WS answer.
+    act(() => result.current.answerAsk("stale-id", true));
+    expect(socket.sent).not.toContain(
+      JSON.stringify({ type: "ask_response", id: "stale-id", approved: true }),
+    );
+    // The real pending ask is untouched.
+    expect(result.current.pendingAsk?.id).toBe("head");
+  });
+
+  test("ask_cancelled from the server clears the modal without an answer", () => {
+    const { result } = renderHook(() => useChat({ port: 4321, token: "secret" }));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.open());
+
+    act(() => socket.emit({ type: "ask", id: "c1", toolName: "tool_a", reason: "needs OK" }));
+    expect(result.current.pendingAsk?.id).toBe("c1");
+
+    act(() => socket.emit({ type: "ask_cancelled", id: "c1", reason: "timeout" }));
+    expect(result.current.pendingAsk).toBeUndefined();
+    // No stale answer was sent for the cancelled ask.
+    expect(socket.sent.some((s) => s.includes("ask_response"))).toBe(false);
   });
 });

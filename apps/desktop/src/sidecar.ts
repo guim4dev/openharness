@@ -29,6 +29,13 @@ export type ServerMessage =
    */
   | { type: "ask"; id: string; toolName: string; reason?: string }
   /**
+   * An outstanding `ask` was finished WITHOUT a client answer (timeout or the
+   * answering socket disconnected): the tool has already been denied
+   * server-side. Sent so the client can drop the now-dead approval modal, which
+   * would otherwise linger and later fire a stale (rejected) `ask_response`.
+   */
+  | { type: "ask_cancelled"; id: string; reason: string }
+  /**
    * Verify-on-boot refusal: the harness definition could not be verified
    * (unsigned, tampered, or signed by the wrong key). No session exists; this
    * frame is the whole conversation. Distinct from `error`, which is a failure
@@ -117,7 +124,12 @@ export async function startSidecar(opts: StartSidecarOptions): Promise<SidecarHa
   // which point a client has connected and `currentSocket` is set.
   interface PendingAsk {
     socket: WebSocket;
-    finish: (approved: boolean) => void;
+    /**
+     * Settle the ask. `cancelReason` (timeout/disconnect — i.e. NOT a client
+     * answer) additionally emits an `ask_cancelled` frame so the client drops
+     * its modal; a client answer passes no reason and emits nothing.
+     */
+    finish: (approved: boolean, cancelReason?: string) => void;
   }
   const pendingAsks = new Map<string, PendingAsk>();
   let currentSocket: WebSocket | undefined;
@@ -136,14 +148,17 @@ export async function startSidecar(opts: StartSidecarOptions): Promise<SidecarHa
       }
       const id = randomBytes(16).toString("base64url");
       let settled = false;
-      const finish = (approved: boolean): void => {
+      const finish = (approved: boolean, cancelReason?: string): void => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
         pendingAsks.delete(id);
+        // A server-side denial (timeout/disconnect) tells the client to drop the
+        // modal; a client answer (no reason) needs no frame.
+        if (cancelReason !== undefined) send(socket, { type: "ask_cancelled", id, reason: cancelReason });
         resolve(approved);
       };
-      const timer = setTimeout(() => finish(false), askTimeoutMs);
+      const timer = setTimeout(() => finish(false, "approval timed out"), askTimeoutMs);
       pendingAsks.set(id, { socket, finish });
       send(socket, {
         type: "ask",
@@ -189,7 +204,7 @@ export async function startSidecar(opts: StartSidecarOptions): Promise<SidecarHa
     socket.on("close", () => {
       if (currentSocket === socket) currentSocket = undefined;
       for (const pending of [...pendingAsks.values()]) {
-        if (pending.socket === socket) pending.finish(false);
+        if (pending.socket === socket) pending.finish(false, "client disconnected");
       }
     });
 
@@ -216,14 +231,13 @@ export async function startSidecar(opts: StartSidecarOptions): Promise<SidecarHa
         return;
       }
       // A human's answer to an outstanding `ask`. Correlate by id; an answer
-      // with no matching pending ask (stale, duplicate, or forged) is rejected.
+      // with no matching pending ask (already settled by timeout/disconnect,
+      // duplicate, or stale) is a BENIGN NO-OP — never an error frame, which
+      // would surface as a spurious error bubble in the UI for a modal the
+      // server already cancelled.
       if (isAskResponse(parsed)) {
         const pending = pendingAsks.get(parsed.id);
-        if (!pending) {
-          send(socket, { type: "error", message: "no pending approval for that id" });
-          return;
-        }
-        pending.finish(parsed.approved);
+        if (pending) pending.finish(parsed.approved);
         return;
       }
       if (!isPromptMessage(parsed)) {

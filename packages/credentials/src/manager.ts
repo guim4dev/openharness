@@ -31,9 +31,18 @@ export class CredentialManager {
     return false; // exhausted | invalid
   }
 
-  activeAccount(profileName: string): Account | undefined {
+  /**
+   * The active account for a profile. When `provider` is given, selection and
+   * rotation are scoped to accounts whose `provider` matches it, so a harness
+   * for one vendor can never be handed another vendor's key (cross-vendor
+   * secret disclosure); if no matching-provider account is healthy, returns
+   * undefined — never a different-provider account. When omitted, the legacy
+   * behavior (first/rotated healthy account in the profile) is preserved.
+   */
+  activeAccount(profileName: string, provider?: string): Account | undefined {
     const p = this.profiles.get(profileName);
     if (!p) return undefined;
+    const matches = (a: Account): boolean => provider === undefined || a.provider === provider;
     const ordered = p.accountIds
       .map((id) => this.accounts.get(id))
       .filter((a): a is Account => !!a);
@@ -41,11 +50,11 @@ export class CredentialManager {
       const start = this.rrCursor.get(profileName) ?? 0;
       for (let i = 0; i < ordered.length; i++) {
         const a = ordered[(start + i) % ordered.length];
-        if (this.healthy(a)) return a;
+        if (matches(a) && this.healthy(a)) return a;
       }
       return undefined;
     }
-    return ordered.find((a) => this.healthy(a));
+    return ordered.find((a) => matches(a) && this.healthy(a));
   }
 
   markRotated(profileName: string): void {

@@ -50,6 +50,25 @@ governed and signed, to a TUI and a desktop app. 191 tests, MIT, built on
   tampered/rolled-back/unsigned definition.
 - Server-side audit chain verification rejects re-chained / forked / gapped pushes;
   constant-time bearer comparison; anti-rollback `minVersion` on verified boot.
+- **Provider-aware credential selection** — `Account` carries a `provider`, and
+  `CredentialManager.activeAccount(profile, provider?)` selects/rotates ONLY among
+  matching-provider accounts. Under multi-key BYOK, an OpenAI harness can never be
+  handed an Anthropic key (cross-vendor secret disclosure); no matching account
+  clears the runtime key and yields none — never a different provider's key.
+- **Redaction fails closed on audit failure** — a throwing audit sink can no longer
+  skip the policy extension's redacted `tool_result` return or a `tool_call`
+  block/redaction; the security outcome is applied independent of audit durability.
+- **MCP secret namespace guard** — an MCP `secrets` ref in the reserved LLM-credential
+  namespace (`api-key:*`) is rejected at connect, so a signed definition cannot name
+  an LLM key as an MCP header/env and exfiltrate it to an arbitrary endpoint.
+- **Build fails loud on out-of-dir references** — `buildHarnessApp` refuses a
+  definition whose `systemPrompt`/`appendSystemPrompt` file, `promptLibrary`, skill
+  dir, or project-relative MCP path escapes the definition dir, rather than silently
+  shipping a bundle missing those files.
+- **Desktop approval modal cannot orphan** — the sidecar emits an `ask_cancelled`
+  frame when it finishes an `ask` without a client answer (timeout/disconnect), and a
+  stale `ask_response` is a benign no-op (no error bubble). Concurrent `ask`s queue
+  and surface one at a time instead of overwriting each other.
 
 ### Deferred (roadmap)
 

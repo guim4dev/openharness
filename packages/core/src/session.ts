@@ -34,6 +34,7 @@ function classify(err: unknown): ErrorKind {
 export async function startSession(opts: StartSessionOptions): Promise<OpenHarnessSession> {
   const def = await loadHarnessDefinition(opts.harnessPath);
   const profileName = def.manifest.providers.default.credentialProfile;
+  const providerId = def.manifest.providers.default.provider;
   const model = { id: def.manifest.providers.default.model };
 
   return {
@@ -41,8 +42,13 @@ export async function startSession(opts: StartSessionOptions): Promise<OpenHarne
       let rotations = 0;
       const maxAttempts = 8;
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        const account = opts.manager.activeAccount(profileName);
-        if (!account) throw new Error(`No healthy credential accounts for profile '${profileName}'.`);
+        // Scope to the harness's provider so rotation never hands a request to
+        // this vendor's endpoint a different vendor's key.
+        const account = opts.manager.activeAccount(profileName, providerId);
+        if (!account)
+          throw new Error(
+            `No healthy credential accounts for provider '${providerId}' (profile '${profileName}').`,
+          );
         const provider = opts.registry.get(account.authProviderId);
         if (!provider) throw new Error(`Unknown auth provider '${account.authProviderId}'.`);
         const req = await provider.applyToRequest(account.credential, { headers: {} });

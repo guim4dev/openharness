@@ -26,6 +26,7 @@ test("rotates to the next account when the first hits a rate limit, then succeed
   const accounts: Account[] = [
     {
       id: "a",
+      provider: "anthropic",
       authProviderId: "api-key",
       label: "a",
       credential: { kind: "api_key", secretRef: "api-key:a" },
@@ -33,6 +34,7 @@ test("rotates to the next account when the first hits a rate limit, then succeed
     },
     {
       id: "b",
+      provider: "anthropic",
       authProviderId: "api-key",
       label: "b",
       credential: { kind: "api_key", secretRef: "api-key:b" },
