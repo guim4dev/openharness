@@ -9,7 +9,10 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { AgentSession, InlineExtension, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
+import { readFileSync } from "node:fs";
 import { loadHarnessDefinition } from "@openharness/definition";
+import type { HarnessDefinition } from "@openharness/definition";
+import { loadVerifiedDefinition } from "@openharness/bundle";
 import type { AuthProviderRegistry, CredentialManager } from "@openharness/credentials";
 import { loadMcpTools } from "@openharness/mcp";
 import { checkModel } from "@openharness/policy";
@@ -26,7 +29,21 @@ export type LiveSessionEvent =
   | { type: "error"; message: string };
 
 export interface CreateLiveSessionOptions {
-  harnessPath: string;
+  /**
+   * Path to a harness definition dir loaded WITHOUT signature verification —
+   * the dev/local path. Ignored when `verified` is set. Optional so a verified
+   * boot needs no on-disk definition at all.
+   */
+  harnessPath?: string;
+  /**
+   * Verify-on-boot: when set, the session boots pinned to a cryptographically
+   * verified definition instead of an unverified local dir. The bundle at
+   * `bundlePath` must carry a signature that validates under the org public key
+   * read from `pubkeyPath`, and every bundled file's hash must match; otherwise
+   * a `BundleVerificationError` is thrown before any session is created
+   * (fail-closed). Takes precedence over `harnessPath`.
+   */
+  verified?: { bundlePath: string; pubkeyPath: string };
   manager: CredentialManager;
   registry: AuthProviderRegistry;
   /** Credential profile to drive rotation against. */
@@ -91,8 +108,28 @@ export interface LiveSession {
  * "text_delta"`; the run is complete at `agent_end`/settle (we await
  * `waitForIdle()`), and the final text is read via `getLastAssistantText()`.
  */
+/**
+ * Resolve the harness definition for a session. With `verified` set, the
+ * definition is loaded through the signed-bundle trust path: the signature over
+ * the bundle manifest must validate under the org public key and every file's
+ * hash must match, or `loadVerifiedDefinition` throws `BundleVerificationError`.
+ * That error is left to propagate UNCHANGED so a caller (e.g. the desktop
+ * sidecar) can distinguish an integrity failure from an ordinary startup error
+ * and refuse to boot. Without `verified`, the local dir is loaded unverified.
+ */
+async function resolveDefinition(opts: CreateLiveSessionOptions): Promise<HarnessDefinition> {
+  if (opts.verified) {
+    return loadVerifiedDefinition(
+      opts.verified.bundlePath,
+      readFileSync(opts.verified.pubkeyPath, "utf8"),
+    );
+  }
+  if (opts.harnessPath) return loadHarnessDefinition(opts.harnessPath);
+  throw new Error("createLiveSession requires either `harnessPath` (dev) or a `verified` bundle");
+}
+
 export async function createLiveSession(opts: CreateLiveSessionOptions): Promise<LiveSession> {
-  const def = await loadHarnessDefinition(opts.harnessPath);
+  const def = await resolveDefinition(opts);
   const provider = def.manifest.providers.default;
   const providerId = provider.provider;
   const modelId = provider.model;

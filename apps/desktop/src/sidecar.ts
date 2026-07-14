@@ -4,7 +4,8 @@ import type { AddressInfo } from "node:net";
 import { WebSocketServer } from "ws";
 import type { WebSocket } from "ws";
 import { createLiveSession } from "@openharness/core";
-import type { CreateLiveSessionOptions } from "@openharness/core";
+import type { CreateLiveSessionOptions, LiveSession } from "@openharness/core";
+import { BundleVerificationError } from "@openharness/bundle";
 
 /** Frames the client sends to the sidecar. */
 export type ClientMessage = { type: "prompt"; text: string };
@@ -13,7 +14,14 @@ export type ClientMessage = { type: "prompt"; text: string };
 export type ServerMessage =
   | { type: "token"; text: string }
   | { type: "done" }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  /**
+   * Verify-on-boot refusal: the harness definition could not be verified
+   * (unsigned, tampered, or signed by the wrong key). No session exists; this
+   * frame is the whole conversation. Distinct from `error`, which is a failure
+   * WITHIN an otherwise-trusted session.
+   */
+  | { type: "integrity_error"; message: string };
 
 export interface SidecarHandle {
   /** Ephemeral loopback port the WS server is listening on. */
@@ -54,10 +62,27 @@ function send(socket: WebSocket, message: ServerMessage): void {
  *
  * Prompts are serialized per sidecar so runs never overlap (an overlapping run
  * would require Pi's streamingBehavior); each turn awaits settlement first.
+ *
+ * Verify-on-boot: when `opts.verified` points at a signed bundle whose signature
+ * does not validate (unsigned / tampered / wrong key), `createLiveSession`
+ * throws a `BundleVerificationError`. Rather than crash the sidecar (a dead
+ * socket looks like a bug), we come up in a REFUSAL mode: the WS server still
+ * listens and accepts the authenticated client, but it announces a single
+ * `integrity_error` frame and runs no session. A designed refusal, not silence.
  */
 export async function startSidecar(opts: StartSidecarOptions): Promise<SidecarHandle> {
   const token = randomBytes(32).toString("base64url");
-  const live = await createLiveSession(opts);
+
+  // Boot the session. If verification fails, hold the reason and enter refusal
+  // mode instead of propagating (so the UI can render a designed lock screen).
+  let live: LiveSession | undefined;
+  let integrityError: string | undefined;
+  try {
+    live = await createLiveSession(opts);
+  } catch (err) {
+    if (err instanceof BundleVerificationError) integrityError = err.message;
+    else throw err;
+  }
 
   const server = new WebSocketServer({
     host: "127.0.0.1",
@@ -77,6 +102,20 @@ export async function startSidecar(opts: StartSidecarOptions): Promise<SidecarHa
   let queue: Promise<void> = Promise.resolve();
 
   server.on("connection", (socket: WebSocket) => {
+    // Refusal mode: no session was created. Announce the integrity failure and
+    // keep the connection open; any prompt is answered with the same frame, so
+    // no `token`/`done` can ever follow. The app is locked until a valid signed
+    // configuration is provided.
+    if (integrityError !== undefined) {
+      const message = integrityError;
+      send(socket, { type: "integrity_error", message });
+      socket.on("message", () => send(socket, { type: "integrity_error", message }));
+      return;
+    }
+
+    // Normal mode: verification passed (or was not requested), so a session
+    // exists. `integrityError === undefined` guarantees `live` is set.
+    const session = live as LiveSession;
     socket.on("message", (raw: Buffer | ArrayBuffer | Buffer[]) => {
       let parsed: unknown;
       try {
@@ -92,7 +131,7 @@ export async function startSidecar(opts: StartSidecarOptions): Promise<SidecarHa
       const { text } = parsed;
       queue = queue.then(async () => {
         try {
-          await live.prompt(text, (event) => {
+          await session.prompt(text, (event) => {
             if (event.type === "token") send(socket, { type: "token", text: event.text });
             else if (event.type === "done") send(socket, { type: "done" });
             else send(socket, { type: "error", message: event.message });
@@ -112,7 +151,7 @@ export async function startSidecar(opts: StartSidecarOptions): Promise<SidecarHa
         server.close((err) => (err ? reject(err) : resolve()));
         for (const client of server.clients) client.terminate();
       });
-      await live.close();
+      await live?.close();
     },
   };
 }

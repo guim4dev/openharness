@@ -49,9 +49,41 @@ function statusLabel(connection: Connection | null, connected: boolean, streamin
   return streaming ? "Thinking…" : "Ready";
 }
 
+/**
+ * Verify-on-boot refusal screen. Shown when the sidecar reports that the
+ * configuration could not be cryptographically verified. Calm and legible on
+ * purpose — a locked door, not a stack trace. The technical detail is offered
+ * quietly for whoever needs it, but the headline stays human.
+ */
+function IntegrityLock({ detail }: { detail?: string }) {
+  return (
+    <div className="lock" role="alert" aria-live="assertive">
+      <div className="lock-card">
+        <div className="lock-badge" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="4.5" y="10.5" width="15" height="9.5" rx="2.2" />
+            <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+          </svg>
+        </div>
+        <h1>Configuration could not be verified</h1>
+        <p className="lock-lead">
+          This app only runs a configuration signed by your organization. The
+          configuration it was given did not pass that check, so it has been
+          locked to keep you safe.
+        </p>
+        <p className="lock-sub">
+          The app stays locked until a valid, signed configuration is provided.
+          Please contact whoever set this up.
+        </p>
+        {detail ? <p className="lock-detail">Details: {detail}</p> : null}
+      </div>
+    </div>
+  );
+}
+
 export function App() {
   const connection = useMemo(readConnection, []);
-  const { messages, status, connected, send } = useChat(connection);
+  const { messages, status, connected, send, integrityMessage } = useChat(connection);
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -59,6 +91,11 @@ export function App() {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
+
+  // Verify-on-boot refusal takes over the whole window: no chat surface at all.
+  if (status === "integrity_error") {
+    return <IntegrityLock {...(integrityMessage !== undefined ? { detail: integrityMessage } : {})} />;
+  }
 
   const streaming = status === "streaming";
   const canSend = connected && !streaming && draft.trim().length > 0;
