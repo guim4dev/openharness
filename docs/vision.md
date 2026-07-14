@@ -10,7 +10,7 @@ Last updated: 2026-07-14 (after an autonomous build night).
 
 ## 0. Current state (what's actually built)
 
-On `main`, **397 tests green**, typecheck + `cargo check` green. A cross-cutting
+On `main`, **405 tests green**, typecheck + `cargo check` green. A cross-cutting
 integration test proves MCP + policy + audit compose end-to-end in one live
 session, and adversarial review passes hardened the security claims (honest
 audit-integrity framing + server-side chain verification, policy fails loud on a
@@ -19,7 +19,10 @@ transport then closed three real holes: DPoP proofs are now single-use
 (anti-replay), the pinned server `pubkey` is actually enforced (the client
 verifies a per-request server signature + requires TLS off-loopback), and the
 HTTP entry contains per-request failures instead of crashing the shared server.
-Packages/apps:
+A further review of the v2.x/v3 work closed six more: three Postmark-tap bypasses
+(array-element, prototype-named key, value-override redirect), an IPv6/bracket
+SSRF gap, a replay-guard O(n²) DoS, a docker digest-pin false-negative, and a
+visual-builder round-trip that had silently dropped the gateway pin. Packages/apps:
 
 - **`@openharness/definition`** — HarnessDefinition (dir + `harness.json` + optional
   `policy.json` + `mcp` + `gateway` sections), zod-validated, fail-fast loader.
