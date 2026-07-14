@@ -8,11 +8,16 @@ decisions (D1–D12); this holds the sequence.
 
 Governance that a determined insider can't route around, without taking
 execution away from the machine that does the work. v1 makes tampering
-**evident** (signed definitions + hash-chained audit); the arc of the roadmap
-is to make bypass **pointless** (org secrets and enforcement that never live on
-the employee's laptop at all) — while keeping the whole stack self-hostable and
-open source. We move a capability from "local-first" to "central" only when the
-central version is a strict security gain, never to add a rent.
+**evident** (signed definitions + hash-chained audit); the arc of the roadmap is
+to move org secrets and egress governance off the employee's laptop entirely, so
+that a compromised endpoint means *abuse confined to one user's policy scope,
+fully audited and revocable in one place* — not stolen org credentials used
+invisibly forever. (Not "bypass becomes pointless": a patched binary still holds
+a valid session and can drive every tool its user's policy allows — the honest
+win is confining and auditing the blast radius, not eliminating it.) All of this
+stays self-hostable and open source. We move a capability from "local-first" to
+"central" only when the central version is a strict security gain, never to add
+a rent.
 
 ## Where we are — v1 (shipped)
 
@@ -54,10 +59,10 @@ everyone else. Before we lean on that claim we should exercise it.
 
 ## v2 — the remote MCP gateway (the moat)
 
-The point where "evident" becomes "pointless." Today MCP-server secrets resolve
-from the employee's local store; a determined insider can read them. v2 moves
-the credential and the network egress **server-side**: the harness calls the
-org gateway, the gateway holds the real credentials and talks to the third
+Where credential theft stops paying off. Today MCP-server secrets resolve from
+the employee's local store; a determined insider can read them. v2 moves the
+credential and the network egress **server-side**: the harness calls the org
+gateway, the gateway holds the real credentials and talks to the third
 party, and the employee's machine never sees the secret.
 
 This is also where the ecosystem's sharpest edges live, so the design is
@@ -78,8 +83,12 @@ constrained by them rather than discovering them later:
 - **A compliance/export API** so the authoritative audit stream feeds existing
   SIEM / retention systems — the integration regulated buyers actually ask for.
 
-Boundary work lands with it, per the wiring checklist in `VAMMO.md`: transport,
-storage bind, endpoint auth, which credentials it carries, and who can reach it.
+Boundary work lands with it: transport, storage bind, endpoint auth, which
+credentials it carries, and who can reach it — with the gateway's URL and public
+key pinned inside the signed definition. The full design (architecture, the
+failure modes it must survive, the smallest defensible slice, and the open
+questions a human must answer first) is in
+[`specs/2026-07-14-remote-mcp-gateway-design.md`](specs/2026-07-14-remote-mcp-gateway-design.md).
 
 ## v2.x — trust the artifact end to end
 
