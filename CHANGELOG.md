@@ -7,7 +7,7 @@ All notable changes to OpenHarness. This project adheres to
 ## [Unreleased] — 2026-07-14 (initial build)
 
 The first end-to-end build: a company can define its own harness and ship it,
-governed and signed, to a TUI and a desktop app. 382 tests, MIT, built on
+governed and signed, to a TUI and a desktop app. 391 tests, MIT, built on
 [Pi](https://pi.dev).
 
 ### Added
@@ -24,8 +24,11 @@ governed and signed, to a TUI and a desktop app. 382 tests, MIT, built on
   (reachable from the chat header) authors a definition from a form: branding,
   system prompt, provider, policy rules, skills, and MCP servers render live as
   `harness.json` + `policy.json` with field-level validation — no hand-edited
-  JSON. Backed by a pure, tested model (`builder.ts` + `useBuilder`); the
-  authoritative gate stays `openharness doctor` on the saved files.
+  JSON. Backed by a pure, tested model (`builder.ts` + `useBuilder`). A "Save &
+  verify" button persists the draft via the sidecar (written under the config dir
+  with a sanitized name — no file dialog) and runs doctor, surfacing the verdict;
+  the headless path is `openharness materialize <spec> <dir>`. The authoritative
+  gate stays `openharness doctor` on the saved files.
 - **Governance data plane**
   - `@openharness/mcp` — MCP client (stdio + streamable-HTTP) bridging each MCP tool
     into a Pi tool (`mcp__server__tool`); mandatory servers fail fast; server secrets

@@ -141,10 +141,13 @@ questions a human must answer first) is in
   Started: a `BuilderPanel` (reachable from the desktop chat header) with a pure,
   tested model — fill branding/prompt/provider, policy rules, skills, and MCP
   servers, and watch the live `harness.json`/`policy.json` render with
-  field-level validation. The "ship" primitive is built + tested
-  (`writeHarnessDefinition` materializes a complete definition from the builder's
-  objects; `openharness materialize <spec> <dir>` is the headless path). Remaining:
-  wire the desktop save button to it via the sidecar (needs a Tauri file dialog).
+  field-level validation, then **saves to disk** — a "Save & verify" button sends
+  the draft over the sidecar, which writes it under the config dir (sanitized
+  name, no file dialog) and runs doctor, surfacing the verdict. The headless path
+  is `openharness materialize <spec> <dir>`. The write+doctor+sanitize core, the
+  reducer, and the panel are unit-tested; the WS/Tauri round-trip is
+  typecheck-verified (not yet exercised in a running app). Remaining polish:
+  a load-existing-definition flow and richer skill authoring.
 - **Managed cloud** — a hosted gateway + bundle host + audit sink for orgs that
   don't want to run infra, with the self-hosted path always a first-class equal.
 
