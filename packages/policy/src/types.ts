@@ -4,8 +4,10 @@ export type PolicyAction = "allow" | "deny" | "ask";
 /**
  * One ordered rule. `match` is a Claude Code-style glob over the tool identity:
  * - the tool name (`read`, `write`, `mcp__linear__delete_*`), OR
- * - the parameterized `bash(<glob>)` form, where `<glob>` is matched against the
- *   bash command string (e.g. `bash(git *)`, `bash(rm -rf *)`).
+ * - the parameterized `<tool>(<glob>)` form: for `bash` the glob matches the
+ *   command string (e.g. `bash(git *)`); for any other tool it matches a
+ *   case-insensitive canonical string of the tool's args, so a keyword in any
+ *   (even nested) arg fires it (e.g. `mcp__db__write_query(*DELETE*)`).
  * First matching rule wins; an unmatched call falls through to `Policy.default`.
  */
 export interface PolicyRule {
