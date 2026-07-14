@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useChat, type ChatMessage, type Connection } from "./chat.ts";
+import { useChat, type ChatMessage, type Connection, type PendingAsk } from "./chat.ts";
 
 declare global {
   interface Window {
@@ -81,9 +81,83 @@ function IntegrityLock({ detail }: { detail?: string }) {
   );
 }
 
+/**
+ * Policy approval modal. Shown when a tool call is gated behind a policy `ask`.
+ * Calm and obvious on purpose: one clear question, the policy's reason, and two
+ * unambiguous choices. Any dismissal (Deny, Escape, backdrop) denies the tool —
+ * fail-closed carried all the way to the UI. Approve is the deliberate action.
+ */
+function AskModal({
+  ask,
+  onDecide,
+}: {
+  ask: PendingAsk;
+  onDecide: (id: string, approved: boolean) => void;
+}) {
+  const denyRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    // Focus the safe default (Deny) and let Escape stand in for it.
+    denyRef.current?.focus();
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") onDecide(ask.id, false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [ask.id, onDecide]);
+
+  return (
+    <div
+      className="ask-backdrop"
+      role="presentation"
+      onClick={() => onDecide(ask.id, false)}
+    >
+      <div
+        className="ask-card"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="ask-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="ask-badge" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 3l8.5 4.8v6.9c0 3.9-3.4 6.8-8.5 8-5.1-1.2-8.5-4.1-8.5-8V7.8L12 3z" />
+            <path d="M12 9.2v3.6" />
+            <path d="M12 15.6h.01" />
+          </svg>
+        </div>
+        <h2 id="ask-title" className="ask-title">
+          Allow <span className="ask-tool">{ask.toolName}</span> to run?
+        </h2>
+        <p className="ask-reason">
+          {ask.reason ?? "This action requires your approval before it can run."}
+        </p>
+        <div className="ask-actions">
+          <button
+            ref={denyRef}
+            className="ask-btn ask-deny"
+            type="button"
+            onClick={() => onDecide(ask.id, false)}
+          >
+            Deny
+          </button>
+          <button
+            className="ask-btn ask-approve"
+            type="button"
+            onClick={() => onDecide(ask.id, true)}
+          >
+            Approve
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function App() {
   const connection = useMemo(readConnection, []);
-  const { messages, status, connected, send, integrityMessage } = useChat(connection);
+  const { messages, status, connected, send, integrityMessage, pendingAsk, answerAsk } =
+    useChat(connection);
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -152,6 +226,8 @@ export function App() {
         </div>
         <p className="hint">Press Enter to send · Shift + Enter for a new line</p>
       </footer>
+
+      {pendingAsk ? <AskModal ask={pendingAsk} onDecide={answerAsk} /> : null}
     </div>
   );
 }

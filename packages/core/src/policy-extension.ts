@@ -21,6 +21,18 @@ export interface PolicyExtensionOptions {
    * (SHA-256 over redacted payloads) and non-sensitive metadata.
    */
   audit?: AuditSink;
+  /**
+   * Out-of-band approval resolver for `ask` decisions. When provided it takes
+   * precedence over the in-process `ctx.ui.confirm` path: the desktop sidecar
+   * wires this to pop an approve/deny dialog in the React UI over the loopback
+   * WS and resolves the tool call with the user's answer.
+   *
+   * Fail-closed: a rejected promise (or a thrown error) is treated as a DENY,
+   * and the resolver itself is responsible for denying when no human can be
+   * reached (no client, timeout, socket closed). When omitted, the legacy
+   * behavior is unchanged — `ctx.ui.confirm` if a dialog UI exists, else DENY.
+   */
+  askUser?: (req: { toolName: string; reason?: string }) => Promise<boolean>;
 }
 
 /** `mcp__<server>__<tool>` -> `<server>`; undefined for non-MCP tools. */
@@ -54,10 +66,12 @@ function finiteNumber(value: unknown): number | undefined {
  *
  * Hooks:
  * - `tool_call`  — deny ⇒ `{ block: true, reason }` (agent-loop turns this into
- *   an error tool-result the model sees; the tool never runs). ask ⇒ ctx.ui.confirm
- *   when a dialog UI is available, else DENY (fail-closed for headless/desktop).
- *   allow ⇒ redact the args by mutating `event.input` IN PLACE (the same object
- *   the tool executes with), so secrets never reach the tool.
+ *   an error tool-result the model sees; the tool never runs). ask ⇒ the
+ *   out-of-band `askUser` resolver when one is wired (the desktop's WS dialog),
+ *   else `ctx.ui.confirm` when a dialog UI is available, else DENY (fail-closed
+ *   for headless with no resolver). allow ⇒ redact the args by mutating
+ *   `event.input` IN PLACE (the same object the tool executes with), so secrets
+ *   never reach the tool.
  * - `tool_result` — redact `content`/`details` before the result re-enters context.
  * - `before_provider_request` — defense-in-depth model-denial warning (cannot block).
  *
@@ -74,6 +88,7 @@ export function buildPolicyExtension(
   const log = opts.logger ?? ((m: string) => console.error(m));
   const providerId = opts.providerId;
   const audit = opts.audit;
+  const askUser = opts.askUser;
 
   function redactInPlace(input: Record<string, unknown>): void {
     if (redactors.length === 0) return;
@@ -113,7 +128,15 @@ export function buildPolicyExtension(
 
         if (decision === "ask") {
           let approved = false;
-          if (ctx.hasUI) {
+          if (askUser) {
+            // Out-of-band approval (e.g. the desktop's WS dialog). Any rejection
+            // is a DENY — fail-closed if the resolver itself errors.
+            try {
+              approved = await askUser({ toolName: event.toolName, ...(reason ? { reason } : {}) });
+            } catch {
+              approved = false;
+            }
+          } else if (ctx.hasUI) {
             try {
               approved = await ctx.ui.confirm("Policy approval", `Allow tool "${event.toolName}" to run?`);
             } catch {

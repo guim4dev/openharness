@@ -10,6 +10,11 @@ export type ServerMessage =
   | { type: "done" }
   | { type: "error"; message: string }
   /**
+   * A policy `ask` decision needs a human. The UI must show an approve/deny
+   * dialog and reply with a matching `ask_response`. Correlated by `id`.
+   */
+  | { type: "ask"; id: string; toolName: string; reason?: string }
+  /**
    * Verify-on-boot refusal from the sidecar: the configuration could not be
    * cryptographically verified. Locks the UI — no chat is possible this session.
    */
@@ -29,6 +34,13 @@ export interface ChatMessage {
 
 export type ChatStatus = "idle" | "streaming" | "integrity_error";
 
+/** An outstanding policy approval the user must answer before the tool runs. */
+export interface PendingAsk {
+  id: string;
+  toolName: string;
+  reason?: string;
+}
+
 export interface ChatState {
   messages: ChatMessage[];
   status: ChatStatus;
@@ -39,11 +51,18 @@ export interface ChatState {
    * reason the configuration was refused. Drives the refusal screen.
    */
   integrityMessage?: string;
+  /**
+   * Set while a policy `ask` awaits the user's decision. Drives the approval
+   * modal; cleared by an `answer_ask` action once the user approves or denies.
+   */
+  pendingAsk?: PendingAsk;
 }
 
 export type ChatAction =
   | { type: "send"; text: string }
-  | { type: "server"; event: ServerMessage };
+  | { type: "server"; event: ServerMessage }
+  /** The user answered the pending ask; clear the modal (the answer goes over the WS). */
+  | { type: "answer_ask"; id: string };
 
 export const initialChatState: ChatState = {
   messages: [],
@@ -135,6 +154,19 @@ function applyServerEvent(state: ChatState, event: ServerMessage): ChatState {
       };
     }
 
+    case "ask": {
+      // A tool call is suspended pending the user's approval. Record it so the
+      // UI can raise the modal; the turn's status stays as-is (still streaming).
+      return {
+        ...state,
+        pendingAsk: {
+          id: event.id,
+          toolName: event.toolName,
+          ...(event.reason !== undefined ? { reason: event.reason } : {}),
+        },
+      };
+    }
+
     case "integrity_error": {
       // Terminal: the definition failed verification on boot. Lock the whole UI
       // into a dedicated refusal state — this overrides any in-flight stream and
@@ -164,6 +196,12 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       };
     case "server":
       return applyServerEvent(state, action.event);
+    case "answer_ask": {
+      // Clear the modal once the user has answered THIS ask (ignore stale ids).
+      if (!state.pendingAsk || state.pendingAsk.id !== action.id) return state;
+      const { pendingAsk: _answered, ...rest } = state;
+      return rest;
+    }
   }
 }
 
@@ -181,6 +219,10 @@ export interface UseChat {
   send: (text: string) => void;
   /** Set only in the `integrity_error` status: why the configuration was refused. */
   integrityMessage?: string;
+  /** Set while a policy `ask` awaits the user's decision. Drives the approval modal. */
+  pendingAsk?: PendingAsk;
+  /** Answer the pending ask: forwards `ask_response` to the sidecar and clears the modal. */
+  answerAsk: (id: string, approved: boolean) => void;
 }
 
 /**
@@ -224,11 +266,24 @@ export function useChat(connection: Connection | null): UseChat {
     socket.send(JSON.stringify({ type: "prompt", text }));
   }, []);
 
+  const answerAsk = useCallback((id: string, approved: boolean) => {
+    // Always clear the modal locally. If the socket is gone the sidecar has
+    // already denied this ask (timeout/disconnect), so no answer needs to fly —
+    // fail-closed is preserved either way.
+    dispatch({ type: "answer_ask", id });
+    const socket = socketRef.current;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "ask_response", id, approved }));
+    }
+  }, []);
+
   return {
     messages: state.messages,
     status: state.status,
     connected,
     send,
+    answerAsk,
     ...(state.integrityMessage !== undefined ? { integrityMessage: state.integrityMessage } : {}),
+    ...(state.pendingAsk !== undefined ? { pendingAsk: state.pendingAsk } : {}),
   };
 }

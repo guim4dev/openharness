@@ -90,6 +90,43 @@ describe("chatReducer", () => {
     expect(state.status).toBe("integrity_error");
     expect(state.integrityMessage).toBe("bundle tampered");
   });
+
+  test("an ask event records the pending approval", () => {
+    const state = feed(initialChatState, {
+      type: "ask",
+      id: "ask-1",
+      toolName: "danger_tool",
+      reason: "danger_tool needs approval",
+    });
+    expect(state.pendingAsk).toEqual({
+      id: "ask-1",
+      toolName: "danger_tool",
+      reason: "danger_tool needs approval",
+    });
+  });
+
+  test("an ask mid-stream leaves the stream intact", () => {
+    let state = feed(initialChatState, { type: "token", text: "thinking" });
+    state = feed(state, { type: "ask", id: "ask-2", toolName: "shell" });
+    // The streaming assistant bubble is untouched; only pendingAsk is added.
+    expect(state.status).toBe("streaming");
+    expect(state.messages.at(-1)?.text).toBe("thinking");
+    expect(state.pendingAsk?.id).toBe("ask-2");
+  });
+
+  test("answer_ask clears the pending approval", () => {
+    const asked = feed(initialChatState, { type: "ask", id: "ask-3", toolName: "shell" });
+    expect(asked.pendingAsk).toBeDefined();
+
+    const answered = chatReducer(asked, { type: "answer_ask", id: "ask-3" });
+    expect(answered.pendingAsk).toBeUndefined();
+  });
+
+  test("answer_ask for a stale id is a no-op", () => {
+    const asked = feed(initialChatState, { type: "ask", id: "ask-4", toolName: "shell" });
+    const answered = chatReducer(asked, { type: "answer_ask", id: "not-ask-4" });
+    expect(answered.pendingAsk?.id).toBe("ask-4"); // untouched
+  });
 });
 
 /** Minimal synchronous WebSocket stand-in the hook drives during the test. */
@@ -163,5 +200,26 @@ describe("useChat", () => {
     act(() => result.current.send("too early"));
     expect(socket.sent).toEqual([]);
     expect(result.current.messages).toHaveLength(0);
+  });
+
+  test("raises a pending ask, and answering it sends ask_response and clears the modal", () => {
+    const { result } = renderHook(() => useChat({ port: 4321, token: "secret" }));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.open());
+
+    act(() =>
+      socket.emit({ type: "ask", id: "ask-9", toolName: "danger_tool", reason: "needs OK" }),
+    );
+    expect(result.current.pendingAsk).toEqual({
+      id: "ask-9",
+      toolName: "danger_tool",
+      reason: "needs OK",
+    });
+
+    act(() => result.current.answerAsk("ask-9", true));
+    expect(socket.sent).toContain(
+      JSON.stringify({ type: "ask_response", id: "ask-9", approved: true }),
+    );
+    expect(result.current.pendingAsk).toBeUndefined();
   });
 });
