@@ -11,7 +11,9 @@ import {
   apiKeyAuthProvider,
 } from "@openharness/credentials";
 import type { Account, Profile } from "@openharness/credentials";
-import { createStubModelRegistry } from "@openharness/core";
+import { createStubModelRegistry, createToolCallingStubModelRegistry } from "@openharness/core";
+import type { Policy } from "@openharness/core";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { generateKeypair, bundleDefinition, writeBundle } from "@openharness/bundle";
 import { startSidecar } from "./sidecar.ts";
 import type { SidecarHandle } from "./sidecar.ts";
@@ -106,6 +108,174 @@ interface Frame {
   type: string;
   text?: string;
   message?: string;
+  id?: string;
+  toolName?: string;
+  reason?: string;
+}
+
+interface ToolRecord {
+  calls: number;
+}
+
+/** A tool whose body increments `record.calls` — so a test can prove it ran (or didn't). */
+function makeCountingTool(record: ToolRecord): ToolDefinition {
+  return {
+    name: "danger_tool",
+    label: "danger_tool",
+    description: "A tool gated behind a policy ask.",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+    } as unknown as ToolDefinition["parameters"],
+    async execute() {
+      record.calls++;
+      return { content: [{ type: "text", text: "tool ran" }], details: undefined };
+    },
+  } as ToolDefinition;
+}
+
+/**
+ * Start a sidecar whose stubbed model calls `danger_tool` on its first turn,
+ * gated behind a policy `ask`. Returns the handle plus the tool's call record so
+ * a test can assert whether approval actually let the tool body run.
+ */
+async function startAskSidecar(opts: { askTimeoutMs?: number }): Promise<{
+  sidecar: SidecarHandle;
+  record: ToolRecord;
+}> {
+  const { manager, registry } = await buildStubCredentials();
+  const record: ToolRecord = { calls: 0 };
+  const policy: Policy = {
+    default: "allow",
+    rules: [{ match: "danger_tool", action: "ask", reason: "danger_tool needs approval" }],
+  };
+  const sidecar = await startSidecar({
+    harnessPath: exampleHarness,
+    manager,
+    registry,
+    profile: "work",
+    cwd: tmp,
+    agentDir: join(tmp, "agent"),
+    noExtensions: true,
+    policy,
+    customTools: [makeCountingTool(record)],
+    ...(opts.askTimeoutMs !== undefined ? { askTimeoutMs: opts.askTimeoutMs } : {}),
+    modelRegistryOverride: createToolCallingStubModelRegistry({
+      provider: "anthropic",
+      modelId: "claude-sonnet-5",
+      toolName: "danger_tool",
+      toolArgs: {},
+      finalReply: "all done",
+    }),
+  });
+  return { sidecar, record };
+}
+
+/**
+ * Connect, send a prompt, and answer the FIRST `ask` frame with `approved`.
+ * Collect frames until done/error.
+ */
+function driveWithAskAnswer(url: string, text: string, approved: boolean): Promise<Frame[]> {
+  return new Promise((resolve, reject) => {
+    const frames: Frame[] = [];
+    const socket = new WebSocket(url);
+    let answered = false;
+    const timer = setTimeout(() => {
+      socket.close();
+      reject(new Error("timed out waiting for done"));
+    }, 10_000);
+    socket.onopen = () => socket.send(JSON.stringify({ type: "prompt", text }));
+    socket.onmessage = (event) => {
+      const frame = JSON.parse(readData(event.data)) as Frame;
+      frames.push(frame);
+      if (frame.type === "ask" && !answered) {
+        answered = true;
+        socket.send(JSON.stringify({ type: "ask_response", id: frame.id, approved }));
+      }
+      if (frame.type === "done" || frame.type === "error") {
+        clearTimeout(timer);
+        socket.close();
+        resolve(frames);
+      }
+    };
+    socket.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error("websocket error before completion"));
+    };
+  });
+}
+
+/** Connect, send a prompt, and IGNORE the ask (never answer). Resolve on done/error. */
+function driveIgnoringAsk(url: string, text: string): Promise<Frame[]> {
+  return new Promise((resolve, reject) => {
+    const frames: Frame[] = [];
+    const socket = new WebSocket(url);
+    const timer = setTimeout(() => {
+      socket.close();
+      reject(new Error("timed out waiting for done"));
+    }, 10_000);
+    socket.onopen = () => socket.send(JSON.stringify({ type: "prompt", text }));
+    socket.onmessage = (event) => {
+      const frame = JSON.parse(readData(event.data)) as Frame;
+      frames.push(frame);
+      if (frame.type === "done" || frame.type === "error") {
+        clearTimeout(timer);
+        socket.close();
+        resolve(frames);
+      }
+    };
+    socket.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error("websocket error before completion"));
+    };
+  });
+}
+
+/** Connect, send a prompt, and CLOSE the socket the moment the ask arrives. */
+function driveClosingOnAsk(url: string, text: string): Promise<{ askSeen: boolean }> {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(url);
+    const timer = setTimeout(() => {
+      socket.close();
+      reject(new Error("timed out waiting for the ask frame"));
+    }, 10_000);
+    socket.onopen = () => socket.send(JSON.stringify({ type: "prompt", text }));
+    socket.onmessage = (event) => {
+      const frame = JSON.parse(readData(event.data)) as Frame;
+      if (frame.type === "ask") {
+        clearTimeout(timer);
+        socket.close(); // disconnect before answering -> must fail closed
+        resolve({ askSeen: true });
+      }
+    };
+    socket.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error("websocket error before the ask"));
+    };
+  });
+}
+
+/** Send a single client frame and resolve with the first server frame that comes back. */
+function sendAndAwaitOneFrame(url: string, message: unknown): Promise<Frame> {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(url);
+    const timer = setTimeout(() => {
+      socket.close();
+      reject(new Error("timed out waiting for a reply frame"));
+    }, 10_000);
+    socket.onopen = () => socket.send(JSON.stringify(message));
+    socket.onmessage = (event) => {
+      clearTimeout(timer);
+      const frame = JSON.parse(readData(event.data)) as Frame;
+      socket.close();
+      resolve(frame);
+    };
+    socket.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error("websocket error"));
+    };
+  });
 }
 
 function readData(data: unknown): string {
@@ -266,6 +436,85 @@ test("refuses to boot a TAMPERED bundle: emits integrity_error, never token/done
     expect(frames.some((f) => f.type === "done")).toBe(false);
     // A designed refusal keeps the connection alive (not a dead/dropped socket).
     expect(stillOpen).toBe(true);
+  } finally {
+    await sidecar.close();
+  }
+});
+
+test("policy ask: emits an ask frame, and approving it lets the tool run", async () => {
+  const { sidecar, record } = await startAskSidecar({});
+  try {
+    const url = `ws://127.0.0.1:${sidecar.port}?token=${encodeURIComponent(sidecar.token)}`;
+    const frames = await driveWithAskAnswer(url, "do the dangerous thing", true);
+
+    const ask = frames.find((f) => f.type === "ask");
+    expect(ask).toBeDefined();
+    expect(ask?.toolName).toBe("danger_tool");
+    expect(ask?.reason).toBe("danger_tool needs approval");
+    expect(typeof ask?.id).toBe("string");
+
+    expect(record.calls).toBe(1); // approved -> the tool body ran
+    expect(frames.at(-1)?.type).toBe("done");
+  } finally {
+    await sidecar.close();
+  }
+});
+
+test("policy ask: denying it blocks the tool but the turn still settles", async () => {
+  const { sidecar, record } = await startAskSidecar({});
+  try {
+    const url = `ws://127.0.0.1:${sidecar.port}?token=${encodeURIComponent(sidecar.token)}`;
+    const frames = await driveWithAskAnswer(url, "do the dangerous thing", false);
+
+    expect(frames.some((f) => f.type === "ask")).toBe(true);
+    expect(record.calls).toBe(0); // denied -> the tool never ran
+    expect(frames.at(-1)?.type).toBe("done");
+  } finally {
+    await sidecar.close();
+  }
+});
+
+test("policy ask fails closed on timeout: no answer within askTimeoutMs denies the tool", async () => {
+  const { sidecar, record } = await startAskSidecar({ askTimeoutMs: 200 });
+  try {
+    const url = `ws://127.0.0.1:${sidecar.port}?token=${encodeURIComponent(sidecar.token)}`;
+    const frames = await driveIgnoringAsk(url, "do the dangerous thing");
+
+    expect(frames.some((f) => f.type === "ask")).toBe(true);
+    expect(record.calls).toBe(0); // timed out -> fail closed
+    expect(frames.at(-1)?.type).toBe("done"); // the turn still settles
+  } finally {
+    await sidecar.close();
+  }
+});
+
+test("policy ask fails closed on disconnect: closing before answering denies the tool", async () => {
+  const { sidecar, record } = await startAskSidecar({});
+  try {
+    const url = `ws://127.0.0.1:${sidecar.port}?token=${encodeURIComponent(sidecar.token)}`;
+    const { askSeen } = await driveClosingOnAsk(url, "do the dangerous thing");
+    expect(askSeen).toBe(true);
+
+    // Give the server a beat to finish the (now-orphaned) turn; the tool must
+    // never have run because the only approver disconnected.
+    await new Promise((r) => setTimeout(r, 400));
+    expect(record.calls).toBe(0);
+  } finally {
+    await sidecar.close();
+  }
+});
+
+test("policy ask: an ask_response with no matching pending ask is rejected", async () => {
+  const sidecar = await startStubSidecar();
+  try {
+    const url = `ws://127.0.0.1:${sidecar.port}?token=${encodeURIComponent(sidecar.token)}`;
+    const frame = await sendAndAwaitOneFrame(url, {
+      type: "ask_response",
+      id: "no-such-id",
+      approved: true,
+    });
+    expect(frame.type).toBe("error");
+    expect(frame.message).toContain("no pending approval");
   } finally {
     await sidecar.close();
   }

@@ -78,6 +78,7 @@ async function runTurn(opts: {
   tool: ToolDefinition;
   toolArgs: Record<string, unknown>;
   onSecondTurnContext?: (context: Context) => void;
+  askUser?: (req: { toolName: string; reason?: string }) => Promise<boolean>;
 }): Promise<LiveSessionEvent[]> {
   const { store, manager, registry } = buildCredentials();
   await store.set("api-key:a", "key-a");
@@ -92,6 +93,7 @@ async function runTurn(opts: {
     noExtensions: true,
     policy: opts.policy,
     customTools: [opts.tool],
+    ...(opts.askUser ? { askUser: opts.askUser } : {}),
     modelRegistryOverride: createToolCallingStubModelRegistry({
       provider: "anthropic",
       modelId: "claude-sonnet-5",
@@ -146,6 +148,70 @@ test("(a3) ask fails closed: an ask decision with no interactive UI blocks the t
   const events = await runTurn({ policy, tool: makeStubTool(record), toolArgs: { token: "anything" } });
 
   expect(record.calls).toBe(0); // no UI -> ask denies rather than allowing
+  expect(events.at(-1)?.type).toBe("done");
+});
+
+test("(a4) ask + askUser resolves true: the tool runs and the reason is forwarded", async () => {
+  const record: ToolRecord = { calls: 0, lastArgs: undefined, resultText: "ran" };
+  const policy: Policy = {
+    default: "allow",
+    rules: [{ match: "secret_echo", action: "ask", reason: "needs a human OK" }],
+  };
+
+  const seen: { toolName: string; reason?: string }[] = [];
+  const askUser = async (req: { toolName: string; reason?: string }) => {
+    seen.push(req);
+    return true;
+  };
+
+  const events = await runTurn({
+    policy,
+    tool: makeStubTool(record),
+    toolArgs: { token: "anything" },
+    askUser,
+  });
+
+  expect(record.calls).toBe(1); // approved -> the tool body ran
+  expect(seen).toEqual([{ toolName: "secret_echo", reason: "needs a human OK" }]);
+  expect(events.at(-1)?.type).toBe("done");
+});
+
+test("(a5) ask + askUser resolves false: the tool is blocked", async () => {
+  const record: ToolRecord = { calls: 0, lastArgs: undefined, resultText: "irrelevant" };
+  const policy: Policy = {
+    default: "allow",
+    rules: [{ match: "secret_echo", action: "ask" }],
+  };
+
+  const events = await runTurn({
+    policy,
+    tool: makeStubTool(record),
+    toolArgs: { token: "anything" },
+    askUser: async () => false,
+  });
+
+  expect(record.calls).toBe(0); // denied -> never ran
+  expect(events.at(-1)?.type).toBe("done"); // turn still settles
+});
+
+test("(a6) ask + askUser throws: fail-closed, the tool is blocked", async () => {
+  const record: ToolRecord = { calls: 0, lastArgs: undefined, resultText: "irrelevant" };
+  const policy: Policy = {
+    default: "allow",
+    rules: [{ match: "secret_echo", action: "ask" }],
+  };
+
+  const events = await runTurn({
+    policy,
+    tool: makeStubTool(record),
+    toolArgs: { token: "anything" },
+    // A resolver that throws (e.g. the WS transport errored) must DENY.
+    askUser: async () => {
+      throw new Error("approval transport failed");
+    },
+  });
+
+  expect(record.calls).toBe(0); // resolver threw -> fail closed
   expect(events.at(-1)?.type).toBe("done");
 });
 

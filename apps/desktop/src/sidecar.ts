@@ -8,13 +8,26 @@ import type { CreateLiveSessionOptions, LiveSession } from "@openharness/core";
 import { BundleVerificationError } from "@openharness/bundle";
 
 /** Frames the client sends to the sidecar. */
-export type ClientMessage = { type: "prompt"; text: string };
+export type ClientMessage =
+  | { type: "prompt"; text: string }
+  /**
+   * The client's answer to a server `ask` frame (a policy `ask` decision). The
+   * `id` correlates back to the outstanding `ask`; `approved` is the human's
+   * decision. An answer with no matching pending ask is rejected.
+   */
+  | { type: "ask_response"; id: string; approved: boolean };
 
 /** Frames the sidecar streams back to the client. */
 export type ServerMessage =
   | { type: "token"; text: string }
   | { type: "done" }
   | { type: "error"; message: string }
+  /**
+   * A policy `ask` decision needs a human. The client must render an
+   * approve/deny dialog and reply with a matching `ask_response`. The tool call
+   * is suspended until the answer arrives (or a timeout/disconnect denies it).
+   */
+  | { type: "ask"; id: string; toolName: string; reason?: string }
   /**
    * Verify-on-boot refusal: the harness definition could not be verified
    * (unsigned, tampered, or signed by the wrong key). No session exists; this
@@ -32,15 +45,31 @@ export interface SidecarHandle {
   close(): Promise<void>;
 }
 
-/** Inputs for the sidecar: everything `createLiveSession` needs. */
-export type StartSidecarOptions = CreateLiveSessionOptions;
+/** Inputs for the sidecar: everything `createLiveSession` needs, plus WS knobs. */
+export type StartSidecarOptions = CreateLiveSessionOptions & {
+  /**
+   * How long to wait for a client's `ask_response` before denying the tool call
+   * (fail-closed). Default 60_000ms. A short value is used by tests.
+   */
+  askTimeoutMs?: number;
+};
 
-function isClientMessage(value: unknown): value is ClientMessage {
+function isPromptMessage(value: unknown): value is Extract<ClientMessage, { type: "prompt" }> {
   return (
     typeof value === "object" &&
     value !== null &&
     (value as { type?: unknown }).type === "prompt" &&
     typeof (value as { text?: unknown }).text === "string"
+  );
+}
+
+function isAskResponse(value: unknown): value is Extract<ClientMessage, { type: "ask_response" }> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { type?: unknown }).type === "ask_response" &&
+    typeof (value as { id?: unknown }).id === "string" &&
+    typeof (value as { approved?: unknown }).approved === "boolean"
   );
 }
 
@@ -56,12 +85,20 @@ function send(socket: WebSocket, message: ServerMessage): void {
  *
  * Protocol:
  *   client -> server: { type: "prompt", text }
+ *                     { type: "ask_response", id, approved }
  *   server -> client: { type: "token", text }  (per streamed assistant delta)
  *                     { type: "done" }          (turn settled)
  *                     { type: "error", message }
+ *                     { type: "ask", id, toolName, reason? }  (policy needs a human)
  *
  * Prompts are serialized per sidecar so runs never overlap (an overlapping run
  * would require Pi's streamingBehavior); each turn awaits settlement first.
+ *
+ * Policy `ask`: a policy `ask` decision suspends the tool call and emits an
+ * `ask` frame to the connected client, resolving when a matching `ask_response`
+ * arrives. It FAILS CLOSED (denies the tool) in every case where a human cannot
+ * be reached: no client connected, no answer within `askTimeoutMs`, or the
+ * socket closes first.
  *
  * Verify-on-boot: when `opts.verified` points at a signed bundle whose signature
  * does not validate (unsigned / tampered / wrong key), `createLiveSession`
@@ -71,14 +108,57 @@ function send(socket: WebSocket, message: ServerMessage): void {
  * `integrity_error` frame and runs no session. A designed refusal, not silence.
  */
 export async function startSidecar(opts: StartSidecarOptions): Promise<SidecarHandle> {
+  const { askTimeoutMs = 60_000, ...sessionOpts } = opts;
   const token = randomBytes(32).toString("base64url");
+
+  // The socket the ask dialog is shown on, and the asks awaiting an answer.
+  // Both are read by the `askUser` closure below; `askUser` is built BEFORE the
+  // session so it can be threaded into it, but only ever fires mid-turn — by
+  // which point a client has connected and `currentSocket` is set.
+  interface PendingAsk {
+    socket: WebSocket;
+    finish: (approved: boolean) => void;
+  }
+  const pendingAsks = new Map<string, PendingAsk>();
+  let currentSocket: WebSocket | undefined;
+
+  /**
+   * Resolve a policy `ask` by asking the connected client. Fail-closed: denies
+   * (resolves false) when no client is connected, when no `ask_response` arrives
+   * within `askTimeoutMs`, or when the socket closes before answering.
+   */
+  const askUser = (req: { toolName: string; reason?: string }): Promise<boolean> =>
+    new Promise<boolean>((resolve) => {
+      const socket = currentSocket;
+      if (!socket || socket.readyState !== socket.OPEN) {
+        resolve(false); // no one to approve -> deny
+        return;
+      }
+      const id = randomBytes(16).toString("base64url");
+      let settled = false;
+      const finish = (approved: boolean): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        pendingAsks.delete(id);
+        resolve(approved);
+      };
+      const timer = setTimeout(() => finish(false), askTimeoutMs);
+      pendingAsks.set(id, { socket, finish });
+      send(socket, {
+        type: "ask",
+        id,
+        toolName: req.toolName,
+        ...(req.reason ? { reason: req.reason } : {}),
+      });
+    });
 
   // Boot the session. If verification fails, hold the reason and enter refusal
   // mode instead of propagating (so the UI can render a designed lock screen).
   let live: LiveSession | undefined;
   let integrityError: string | undefined;
   try {
-    live = await createLiveSession(opts);
+    live = await createLiveSession({ ...sessionOpts, askUser });
   } catch (err) {
     if (err instanceof BundleVerificationError) integrityError = err.message;
     else throw err;
@@ -102,6 +182,17 @@ export async function startSidecar(opts: StartSidecarOptions): Promise<SidecarHa
   let queue: Promise<void> = Promise.resolve();
 
   server.on("connection", (socket: WebSocket) => {
+    // The ask dialog is shown on the most-recently-connected client.
+    currentSocket = socket;
+    // Fail-closed on disconnect: any ask awaiting THIS socket can no longer be
+    // answered, so deny it. Snapshot first — `finish` mutates `pendingAsks`.
+    socket.on("close", () => {
+      if (currentSocket === socket) currentSocket = undefined;
+      for (const pending of [...pendingAsks.values()]) {
+        if (pending.socket === socket) pending.finish(false);
+      }
+    });
+
     // Refusal mode: no session was created. Announce the integrity failure and
     // keep the connection open; any prompt is answered with the same frame, so
     // no `token`/`done` can ever follow. The app is locked until a valid signed
@@ -124,7 +215,18 @@ export async function startSidecar(opts: StartSidecarOptions): Promise<SidecarHa
         send(socket, { type: "error", message: "invalid JSON" });
         return;
       }
-      if (!isClientMessage(parsed)) {
+      // A human's answer to an outstanding `ask`. Correlate by id; an answer
+      // with no matching pending ask (stale, duplicate, or forged) is rejected.
+      if (isAskResponse(parsed)) {
+        const pending = pendingAsks.get(parsed.id);
+        if (!pending) {
+          send(socket, { type: "error", message: "no pending approval for that id" });
+          return;
+        }
+        pending.finish(parsed.approved);
+        return;
+      }
+      if (!isPromptMessage(parsed)) {
         send(socket, { type: "error", message: "unsupported message" });
         return;
       }

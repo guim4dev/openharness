@@ -100,6 +100,15 @@ export interface CreateLiveSessionOptions {
    * decisions, tool results, provider requests) — never prompt/message content.
    */
   auditPath?: string;
+  /**
+   * Out-of-band approval resolver for policy `ask` decisions. When provided it
+   * is threaded into the policy extension and takes precedence over the
+   * in-process `ctx.ui.confirm` path (the desktop sidecar wires this to a WS
+   * approve/deny dialog in the UI). Fail-closed: a rejection is a DENY, and the
+   * resolver must deny when no human can be reached. When omitted, `ask` falls
+   * back to `ctx.ui.confirm` if a dialog UI exists, else DENY.
+   */
+  askUser?: (req: { toolName: string; reason?: string }) => Promise<boolean>;
 }
 
 export interface LiveSession {
@@ -182,7 +191,13 @@ export async function createLiveSession(opts: CreateLiveSessionOptions): Promise
   const auditSink: AuditSink | undefined =
     policy && opts.auditPath ? createFileAuditLog(opts.auditPath) : undefined;
   const policyExtension: InlineExtension[] = policy
-    ? [buildPolicyExtension(policy, { providerId, ...(auditSink ? { audit: auditSink } : {}) })]
+    ? [
+        buildPolicyExtension(policy, {
+          providerId,
+          ...(auditSink ? { audit: auditSink } : {}),
+          ...(opts.askUser ? { askUser: opts.askUser } : {}),
+        }),
+      ]
     : [];
 
   const cwd = opts.cwd ?? process.cwd();
