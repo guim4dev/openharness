@@ -4,7 +4,44 @@
 > far. Update it as decisions change; treat it as the single source of truth for
 > *why* the project is shaped the way it is.
 
-Last updated: 2026-07-13.
+Last updated: 2026-07-14 (after an autonomous build night).
+
+---
+
+## 0. Current state (what's actually built)
+
+On `main`, **139 tests green**, typecheck + `cargo check` green. Packages/apps:
+
+- **`@openharness/definition`** — HarnessDefinition (dir + `harness.json` + optional
+  `policy.json` + `mcp` section), zod-validated, fail-fast loader.
+- **`@openharness/credentials`** — encrypted secret store, multi-account rotation/
+  failover, pluggable AuthProvider registry, api-key provider (covers OpenCode Go).
+- **`@openharness/core`** — cross-platform per-identifier paths, `createLiveSession`
+  (drives a real in-process Pi session, streams tokens), verified-load path
+  (`loadVerifiedDefinition`), `createOpenHarnessAuthStorage`, `loadAccounts` (BYO-key),
+  the policy enforcement extension wiring, `openharness chat/keygen/bundle/build/serve` CLI.
+- **`@openharness/mcp`** — MCP client (stdio + streamable-HTTP) bridging each MCP tool
+  into a Pi tool (`mcp__server__tool`); mandatory servers fail fast. The enforcement seam.
+- **`@openharness/policy`** — deny-by-default first-match rules + secret redaction +
+  model allow/deny; enforced in-process at `tool_call`/`tool_result`/`before_provider_request`.
+- **`@openharness/audit`** — hash-chained JSONL, external calls only (no prompts),
+  emitted from the same code path as enforcement; `verifyAuditLog` tamper-detection.
+- **`@openharness/bundle`** — ed25519-signed `.ohbundle` definition bundles;
+  `verifyBundle`/`loadVerifiedDefinition` (fail-closed, path-traversal-safe).
+- **`@openharness/server`** — thin `GET /bundle` + `POST /audit`, bearer-gated, loopback.
+- **`@openharness/build`** — `openharness build`: a definition → a branded, signed,
+  ready-to-package Tauri project (templated conf, baked signed bundle + org pubkey +
+  esbuilt single-file sidecar; main.rs resolves resources via `resource_dir()` in
+  release). Committed key-scan proves no private key is ever baked.
+- **`apps/tui`** — branded entry over Pi's InteractiveMode. **`apps/desktop`** — Tauri v2
+  shell + React chat + Node WS sidecar; **boots pinned to a signed definition** and shows
+  an integrity-refusal screen on tamper; per-identifier data isolation; real CSP.
+
+Demo proven end-to-end (see `docs/DEMO.md`): build two branded, isolated apps → verify
+→ flip one byte → integrity refusal. **Done:** walking skeleton (4 phases) + governance
+data plane (5) + moat build pipeline (M1–M3). **Deferred:** final `tauri build` +
+fresh-account validation (manual), OS code-signing, remote MCP gateway + credential
+pooling, builder UI, cloud.
 
 ---
 
