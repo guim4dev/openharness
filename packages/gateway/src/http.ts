@@ -27,6 +27,8 @@ export interface GatewayHttpOptions {
   port?: number;
   /** MCP endpoint path (default "/mcp"). */
   path?: string;
+  /** Where non-fatal errors (request failures, cleanup failures) are logged. Default: console.error. */
+  logger?: (message: string, err?: unknown) => void;
 }
 
 export interface GatewayHttpServer {
@@ -41,15 +43,29 @@ function unauthorized(res: ServerResponse): void {
   res.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32001, message: "unauthorized" }, id: null }));
 }
 
+function serverError(res: ServerResponse): void {
+  if (!res.headersSent) res.writeHead(500, { "content-type": "application/json" });
+  if (!res.writableEnded) {
+    res.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32603, message: "internal error" }, id: null }));
+  }
+}
+
 export async function startGatewayHttp(opts: GatewayHttpOptions): Promise<GatewayHttpServer> {
   const path = opts.path ?? "/mcp";
   const host = opts.host ?? "127.0.0.1";
+  const log = opts.logger ?? ((m: string, err?: unknown) => console.error(`[openharness/gateway] ${m}`, err ?? ""));
   // One replay guard for the server: a DPoP proof id authenticates exactly one
   // request, so a captured proof cannot be replayed inside its freshness window.
   const replayGuard = createReplayGuard();
 
   const httpServer = createServer((req, res) => {
-    void handle(req, res);
+    // The handler is fully self-contained: it never rejects (see the try/catch
+    // in handle). A stray rejection here would be an unhandled rejection that
+    // takes down the shared server for every principal, so we still guard it.
+    handle(req, res).catch((err) => {
+      log("request handler crashed", err);
+      serverError(res);
+    });
   });
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -73,17 +89,24 @@ export async function startGatewayHttp(opts: GatewayHttpOptions): Promise<Gatewa
     }
 
     // 2. Per-request stateless MCP server with the caller's Principal pinned.
+    //    Any failure below is contained here: we send a 500 and never let the
+    //    promise reject (which would crash the process for all principals).
     const gateway = createGateway({
       catalog: opts.catalog,
       pipeline: { ...opts.pipeline, resolvePrincipal: () => principal },
     });
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on("close", () => {
-      void transport.close();
-      void gateway.close();
+      void transport.close().catch((err) => log("transport close failed", err));
+      void gateway.close().catch((err) => log("gateway close failed", err));
     });
-    await gateway.server.connect(transport);
-    await transport.handleRequest(req, res);
+    try {
+      await gateway.server.connect(transport);
+      await transport.handleRequest(req, res);
+    } catch (err) {
+      log("failed to handle request", err);
+      serverError(res);
+    }
   }
 
   await new Promise<void>((resolve) => httpServer.listen(opts.port ?? 0, host, () => resolve()));

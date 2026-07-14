@@ -98,6 +98,27 @@ test("e2e over real HTTP: a client WITHOUT DPoP is rejected at the edge (401)", 
   await expect(mcp.connect(transport)).rejects.toThrow();
 });
 
+test("e2e over real HTTP: a malformed request does not crash the shared server", async () => {
+  const { gateway, url } = await boot();
+  const client = generateAuthKeypair();
+  const token = mintGatewayToken(CLAIMS, gateway.privateKey, client.publicKey, { ttlMs: 60_000, now: Date.now() });
+  const proof = createDpopProof(client.privateKey, { method: "POST", url: proofUrl(url) }, Date.now());
+  const headers = { "content-type": "application/json", ...dpopHeaders(token, proof, client.publicKey) };
+
+  // Authenticated but garbage body — must not take the process down.
+  const bad = await fetch(url, { method: "POST", headers, body: "}{ not json" });
+  expect(bad.status).toBeGreaterThanOrEqual(400);
+
+  // The server is still alive: a fresh DPoP-authenticated client works.
+  const mcp = await connectClient(url, gateway.privateKey);
+  try {
+    const res = await mcp.callTool({ name: "github__list_issues", arguments: { owner: "acme", repo: "app" } });
+    expect(res.isError).toBeFalsy();
+  } finally {
+    await mcp.close();
+  }
+});
+
 test("e2e over real HTTP: a captured DPoP proof cannot be replayed (second identical request → 401)", async () => {
   const { gateway, url } = await boot();
   const client = generateAuthKeypair();
