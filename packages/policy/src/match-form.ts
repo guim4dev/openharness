@@ -4,18 +4,43 @@
  * so the two can share this without importing each other (no cycle).
  *
  * - Plain form (`read`, `mcp__linear__delete_*`): a glob over the tool NAME.
- * - Parameterized form (`bash(<glob>)`): the name part globs the tool name AND
- *   the inner part globs the tool's command string.
+ * - Parameterized form (`name(<glob>)`): the name part globs the tool name AND
+ *   the inner part globs an argument string. For `bash` the argument string is
+ *   its `command` (matched case-SENSITIVELY, unchanged). For every OTHER tool it
+ *   is the tool's CANONICAL ARG STRING — all string values in the input, joined
+ *   by newline — matched case-INSENSITIVELY (see `engine.ts`).
  *
- * A trailing `(...)` denotes the parameterized form. Tool names never contain
- * parens, so a name with no parens is a plain tool-name glob.
+ * A well-formed parameterized match is a non-empty, paren-free tool-name part
+ * followed by a balanced trailing `(...)`. Tool names never contain parens, so a
+ * name with no parens is a plain tool-name glob.
  */
 export const PARAMETERIZED = /^([^()]+)\((.*)\)$/s;
 
 /**
- * The ONLY tool whose parameterized `name(<glob>)` form is supported: `bash`
- * exposes a `command` argument to match against. For any other tool there is no
- * argument to glob, so a parameterized rule could never match and would be a
- * silent no-op — the loader rejects it instead (see `parsePolicy`).
+ * The one tool whose parameterized argument is its `command` and is matched
+ * case-SENSITIVELY. Every other tool matches against its canonical arg string
+ * case-insensitively. (Previously this named the ONLY tool that could be
+ * parameterized at all; arg-matching now works for any tool — gap #2 closed.)
  */
-export const PARAMETERIZED_TOOL = "bash";
+export const BASH_TOOL = "bash";
+
+/**
+ * True when `match` contains parens but is NOT a well-formed `name(<glob>)` —
+ * i.e. an empty tool name (`(x)`) or unbalanced parens (`bash(x`, `bash(x))`).
+ * Such a string would otherwise fall through to plain tool-name globbing and
+ * silently never match (a security no-op), so the loader rejects it. A plain
+ * glob with no parens is always well-formed.
+ */
+export function isMalformedMatch(match: string): boolean {
+  if (!match.includes("(") && !match.includes(")")) return false; // plain glob
+  const m = PARAMETERIZED.exec(match);
+  if (!m) return true; // has parens but not `name(...)` — empty name or no closer
+  // Well-formed `name(...)` shell; require the inner parens to balance so
+  // `bash(x))` / `bash((x)` don't slip through as a valid-looking rule.
+  let depth = 0;
+  for (const ch of m[2]) {
+    if (ch === "(") depth++;
+    else if (ch === ")" && --depth < 0) return true;
+  }
+  return depth !== 0;
+}

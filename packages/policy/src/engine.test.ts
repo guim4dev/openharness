@@ -22,10 +22,51 @@ describe("matchToolIdentity", () => {
     expect(matchToolIdentity("bash(rm -rf *)", "bash", { command: "rm -rf /tmp/x" })).toBe(true);
   });
 
-  test("parameterized form never matches a non-bash tool", () => {
-    expect(matchToolIdentity("read(secret *)", "read", { command: "secret x" })).toBe(false);
-    // a bash command with no command field is treated as empty string
+  test("bash with no command field is treated as an empty command string", () => {
     expect(matchToolIdentity("bash(*)", "bash", {})).toBe(true);
+    expect(matchToolIdentity("bash(git *)", "bash", {})).toBe(false);
+  });
+});
+
+describe("matchToolIdentity — parameterized arg-matching on non-bash tools (gap #2)", () => {
+  test("matches a keyword in a top-level string arg, case-insensitively", () => {
+    expect(matchToolIdentity("mcp__db__query(*DELETE*)", "mcp__db__query", { sql: "DELETE FROM orders" })).toBe(true);
+    // SQL keyword case varies — the arg-glob is case-insensitive
+    expect(matchToolIdentity("mcp__db__query(*DELETE*)", "mcp__db__query", { sql: "delete from orders" })).toBe(true);
+    expect(matchToolIdentity("mcp__db__query(*DELETE*)", "mcp__db__query", { sql: "Delete From Orders" })).toBe(true);
+  });
+
+  test("matches a keyword nested in an object and inside an array (fail-safe: any field)", () => {
+    expect(
+      matchToolIdentity("mcp__db__query(*DROP*)", "mcp__db__query", {
+        payload: { statements: ["SELECT 1", "DROP TABLE orders"] },
+      }),
+    ).toBe(true);
+    expect(matchToolIdentity("mcp__x__y(*SECRET*)", "mcp__x__y", { a: { b: { c: "has a secret inside" } } })).toBe(true);
+  });
+
+  test("does NOT match a benign call whose args contain no keyword", () => {
+    expect(matchToolIdentity("mcp__db__query(*DELETE*)", "mcp__db__query", { sql: "SELECT * FROM orders" })).toBe(false);
+    expect(matchToolIdentity("mcp__db__query(*DROP*)", "mcp__db__query", { sql: "INSERT INTO orders VALUES (1)" })).toBe(false);
+  });
+
+  test("the tool-name part must still match the actual tool (case-sensitive)", () => {
+    expect(matchToolIdentity("mcp__db__query(*DELETE*)", "mcp__db__write", { sql: "DELETE FROM x" })).toBe(false);
+  });
+
+  test("empty args: * matches, a keyword pattern does not", () => {
+    expect(matchToolIdentity("mcp__x__y(*)", "mcp__x__y", {})).toBe(true);
+    expect(matchToolIdentity("mcp__x__y(*DELETE*)", "mcp__x__y", {})).toBe(false);
+  });
+
+  test("non-string arg values are ignored (numbers/booleans/null contribute nothing)", () => {
+    expect(matchToolIdentity("mcp__db__query(*DELETE*)", "mcp__db__query", { limit: 5, ok: true, note: null })).toBe(false);
+  });
+
+  test("bash keeps its case-SENSITIVE command matching (unchanged)", () => {
+    expect(matchToolIdentity("bash(git *)", "bash", { command: "git status" })).toBe(true);
+    // an uppercase bash glob does NOT catch a lowercase command
+    expect(matchToolIdentity("bash(GIT *)", "bash", { command: "git status" })).toBe(false);
   });
 });
 

@@ -94,7 +94,7 @@ Bring MCP to the harness (Pi has none), already the enforcement seam.
 ## Format gaps surfaced by realistic harnesses
 
 Building the checked-in `acme-fintech` / `northwind-ops` definitions exposed three
-gaps in the harness/policy format:
+gaps in the harness/policy format — all three now CLOSED:
 
 1. **MCP secret indirection — CLOSED.** `acme-fintech`'s `analytics_readonly` server
    originally embedded a bare Postgres connection string in `args`. An MCP server's
@@ -104,12 +104,21 @@ gaps in the harness/policy format:
    `SecretStore`, fail-closed, threaded `createLiveSession → loadMcpTools →
    connectMcpServer`. Only the ref name ships — the same posture as providers'
    `credentialProfile`.
-2. **Arg-level policy matching beyond bash — OPEN (remaining roadmap item).**
-   Parameterized argument matching (`bash(git *)`) is implemented only for `bash`;
-   `parsePolicy` rejects a parameterized rule on any other tool (e.g.
-   `mcp__db__query(*DROP*)`) at load time so it can't silently become a security
-   no-op. Extending arg-level matching to MCP tool arguments is the outstanding
-   format work — deliberately not attempted here.
+2. **Arg-level policy matching beyond bash — CLOSED.** Parameterized
+   `name(<glob>)` matching now applies to ANY tool. For `bash` the inner glob
+   still matches its `command` case-SENSITIVELY (unchanged). For every other tool
+   it matches the tool's **canonical arg string** — every string value in the
+   input, collected recursively through nested objects and arrays, joined by
+   `\n` — **case-INSENSITIVELY** and substring-style (`*DELETE*` catches
+   `delete`/`Delete`). Collecting ALL string fields is the fail-SAFE choice: the
+   rule fires if the sensitive keyword appears in ANY field, however deeply
+   nested, so a rule can't be dodged by moving the payload to a differently named
+   arg. `northwind-ops` uses it to `deny`
+   `mcp__back_office__write_query(*DROP*)` / `(*TRUNCATE*)` / `(*ALTER*)` and
+   `ask` on `(*DELETE*)` / `(*UPDATE*)`, with the coarse whole-tool `write_query`
+   rule as the fallback. `parsePolicy` no longer rejects non-bash parameterized
+   rules, but still rejects a genuinely malformed match (empty tool name,
+   unbalanced parens) so it can never silently become a no-op.
 3. **HTTP transport auth — CLOSED.** The streamable-HTTP transport had no way to
    authenticate. Closed via literal `mcp.servers.<name>.headers` plus folding
    `secrets` into http (HEADER name -> credential ref); both are set on the SDK

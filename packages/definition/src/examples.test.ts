@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { decideTool } from "@openharness/policy";
 import { loadHarnessDefinition } from "./load.ts";
 
 // Realistic example harnesses under harnesses/ (see docs/DEMO.md). These mirror
@@ -83,6 +84,25 @@ test("northwind-ops's policy.json parses: ask-by-default for writes, reads allow
   expect(def.policy?.models?.allow).toEqual(["anthropic/claude-*", "openai/gpt-5*"]);
   // Distinct redaction focus from acme-fintech (PII, not cloud/API secrets).
   expect(def.policy?.redact?.some((r) => r.replace === "[REDACTED_EMAIL]")).toBe(true);
+});
+
+test("northwind-ops enforces arg-level SQL control on write_query through decideTool (gap #2)", async () => {
+  const def = await loadHarnessDefinition(harness("northwind-ops"));
+  const policy = def.policy!;
+  // A read is allowed outright.
+  expect(
+    decideTool(policy, "mcp__back_office__read_query", { query: "SELECT * FROM orders WHERE id = 42" }).decision,
+  ).toBe("allow");
+  // A DELETE write asks for confirmation (matched by the parameterized rule, not
+  // the coarse whole-tool rule).
+  expect(
+    decideTool(policy, "mcp__back_office__write_query", { query: "DELETE FROM orders WHERE id = 42" }).decision,
+  ).toBe("ask");
+  // A DROP is denied outright — and case-insensitively, so lowercase `drop` is
+  // caught too.
+  expect(
+    decideTool(policy, "mcp__back_office__write_query", { query: "drop table orders" }).decision,
+  ).toBe("deny");
 });
 
 test("the two examples are meaningfully distinct in branding and policy default posture", async () => {

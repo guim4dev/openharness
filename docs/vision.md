@@ -234,19 +234,26 @@ enforcement server, SSO, approved-build distribution, packaging pipeline, cloud.
 ### Format gaps surfaced by realistic harnesses
 
 Building the checked-in `acme-fintech` / `northwind-ops` definitions surfaced
-three gaps in the harness/policy format. Tracked here as the roadmap item; see
-the governance spec for detail.
+three gaps in the harness/policy format — all three now CLOSED. See the
+governance spec for detail.
 
 1. **MCP secret indirection — CLOSED.** An MCP server's real secret (DB password,
    API token) must never live in `harness.json` / the signed `.ohbundle`. Added
    `mcp.servers.<name>.secrets` mapping an ENV VAR (stdio) or HEADER (http) name to
    a credential **ref name** — resolved at connect-time from the machine-local
    `SecretStore`, fail-closed. Only the ref travels, mirroring `credentialProfile`.
-2. **Arg-level policy matching beyond bash — OPEN (remaining roadmap item).**
-   Argument-level matching (`bash(git *)`) exists only for `bash`; `parsePolicy`
-   rejects a parameterized rule on any other tool (e.g. `mcp__db__query(*DROP*)`)
-   at load time rather than let it become a silent no-op. Matching on MCP tool
-   arguments is the outstanding format extension.
+2. **Arg-level policy matching beyond bash — CLOSED.** Parameterized
+   `name(<glob>)` matching now works for ANY tool, not just `bash`. For a
+   non-bash tool the inner glob matches the **canonical arg string** — every
+   string value in the input, gathered recursively through nested objects and
+   arrays and joined by newline — **case-insensitively** and substring-style
+   (`*DELETE*` catches `delete`/`Delete` in any field). This is the fail-SAFE
+   choice: a sensitive keyword anywhere in the args makes the rule fire, so
+   `northwind-ops` can `deny` `mcp__back_office__write_query(*DROP*)` /
+   `(*TRUNCATE*)` / `(*ALTER*)` and `ask` on `(*DELETE*)` / `(*UPDATE*)`. `bash`
+   keeps matching its `command` case-sensitively. `parsePolicy` still rejects a
+   genuinely malformed match (empty tool name, unbalanced parens) so it can't
+   become a silent no-op.
 3. **HTTP transport auth — CLOSED.** The http MCP transport had no auth field.
    Added literal `mcp.servers.<name>.headers` plus folding `secrets` into http
    (HEADER name -> credential ref), set on the client's request headers at connect.

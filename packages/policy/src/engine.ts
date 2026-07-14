@@ -1,5 +1,5 @@
 import { globMatch } from "./glob.ts";
-import { PARAMETERIZED } from "./match-form.ts";
+import { BASH_TOOL, PARAMETERIZED } from "./match-form.ts";
 import { PolicyError } from "./schema.ts";
 import type { Policy, PolicyAction, ToolEvaluation } from "./types.ts";
 
@@ -7,33 +7,47 @@ import type { Policy, PolicyAction, ToolEvaluation } from "./types.ts";
 // Tool identity matching
 // ---------------------------------------------------------------------------
 
+/** `bash`'s `command` argument as a string (missing/non-string => empty). */
+function bashCommandString(args: unknown): string {
+  const command = (args as { command?: unknown } | null | undefined)?.command;
+  return typeof command === "string" ? command : "";
+}
+
 /**
- * The command string used by the parameterized `tool(<glob>)` match form.
- * Only `bash` exposes one (its `command` argument); for every other tool the
- * form does not apply, so a parameterized pattern never matches it.
+ * The canonical argument string of a tool call: EVERY string value in the input,
+ * gathered recursively through nested objects and arrays, joined by newline.
+ * Non-string values (numbers, booleans, null) contribute nothing. This is the
+ * fail-SAFE surface the parameterized arg-glob matches against — a sensitive
+ * substring in ANY field (however deeply nested) makes the rule fire.
  */
-function toolCommandString(toolName: string, args: unknown): string | undefined {
-  if (toolName === "bash") {
-    const command = (args as { command?: unknown } | null | undefined)?.command;
-    return typeof command === "string" ? command : "";
-  }
-  return undefined;
+function canonicalArgString(args: unknown): string {
+  const parts: string[] = [];
+  const walk = (v: unknown): void => {
+    if (typeof v === "string") parts.push(v);
+    else if (Array.isArray(v)) for (const x of v) walk(x);
+    else if (v !== null && typeof v === "object")
+      for (const x of Object.values(v as Record<string, unknown>)) walk(x);
+  };
+  walk(args);
+  return parts.join("\n");
 }
 
 /**
  * Match a policy `match` pattern against a tool call.
  * - Plain form (`read`, `mcp__linear__delete_*`): glob over the tool name.
- * - Parameterized form (`bash(git *)`): tool-name part globs the tool name AND
- *   the inner part globs the tool's command string (bash only).
+ * - Parameterized form (`name(<glob>)`): the name part globs the tool name AND
+ *   the inner part globs an argument string. For `bash` that is its `command`,
+ *   matched case-SENSITIVELY (unchanged). For any OTHER tool it is the canonical
+ *   arg string (all string values, recursively), matched case-INSENSITIVELY so
+ *   `*DELETE*` also catches `delete`/`Delete` — the fail-safe choice.
  */
 export function matchToolIdentity(pattern: string, toolName: string, args: unknown): boolean {
   const parameterized = PARAMETERIZED.exec(pattern);
   if (parameterized) {
     const [, toolGlob, innerGlob] = parameterized;
     if (!globMatch(toolGlob.trim(), toolName)) return false;
-    const command = toolCommandString(toolName, args);
-    if (command === undefined) return false;
-    return globMatch(innerGlob, command);
+    if (toolName === BASH_TOOL) return globMatch(innerGlob, bashCommandString(args));
+    return globMatch(innerGlob, canonicalArgString(args), true);
   }
   return globMatch(pattern.trim(), toolName);
 }
