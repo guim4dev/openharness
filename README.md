@@ -105,6 +105,22 @@ LLMs are becoming a commodity. The durable value isn't the model — it's the
 them. OpenHarness owns that layer and stays neutral on which model (or
 subscription, or local runtime) sits underneath.
 
+## Docs
+
+| | |
+|---|---|
+| [`docs/DEMO.md`](docs/DEMO.md) | The 90-second story: build two brands → verify → flip one byte → refusal. |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | How the pieces fit — the package map, the in-process governance data plane, the Pi seams. |
+| [`docs/AUTHORING.md`](docs/AUTHORING.md) | Everything a `HarnessDefinition` directory can contain, and how to ship it. |
+| [`docs/vision.md`](docs/vision.md) | The full thinking and the decision log (D1–D12) behind the shape. |
+| [`docs/specs/`](docs/specs) | Per-slice designs (walking skeleton, governance data plane). |
+| [`SECURITY.md`](SECURITY.md) | Threat model, fail-safe invariants, private reporting. |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`CHANGELOG.md`](CHANGELOG.md) | How to contribute · what has shipped. |
+
+The eleven `@openharness/*` packages (plus `apps/tui` and `apps/desktop`) each
+own one responsibility — the [architecture package map](docs/ARCHITECTURE.md#packages)
+is the fastest way to find your way around the monorepo.
+
 ## Security
 
 Found a vulnerability? See [`SECURITY.md`](SECURITY.md) for how to report it
