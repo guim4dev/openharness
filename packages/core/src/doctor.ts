@@ -42,6 +42,16 @@ async function pathExists(p: string): Promise<boolean> {
   }
 }
 
+/**
+ * Whether an npm package spec carries a version pin. Scoped specs
+ * (`@scope/name`) are pinned only when an `@version` follows the scope
+ * (`@scope/name@1.2.3`); unscoped when they contain any `@` (`name@1.2.3`).
+ */
+function npmSpecIsPinned(spec: string): boolean {
+  const body = spec.startsWith("@") ? spec.slice(1) : spec;
+  return body.includes("@");
+}
+
 export async function runDoctor(defDir: string): Promise<DoctorReport> {
   const problems: DoctorProblem[] = [];
 
@@ -92,6 +102,23 @@ export async function runDoctor(defDir: string): Promise<DoctorReport> {
           message: `mcp server '${server}' maps '${key}' to reserved ref '${ref}' — the ${RESERVED_CRED_NAMESPACE}* namespace is rejected at connect`,
         });
     }
+  }
+
+  // 3b. A stdio MCP server run via `npx` WITHOUT a pinned version fetches the
+  //     registry's "latest" on every launch — a supply-chain risk (a malicious or
+  //     breaking upstream update auto-ships, the Postmark-MCP class of incident).
+  //     Nudge pinning `<pkg>@<version>`. Warn (not error): unpinned still works.
+  for (const [server, spec] of Object.entries(manifest.mcp?.servers ?? {})) {
+    if (spec.transport !== "stdio") continue;
+    const cmd = spec.command ?? "";
+    if (cmd !== "npx" && !cmd.endsWith("/npx")) continue;
+    const pkg = (spec.args ?? []).find((a) => !a.startsWith("-"));
+    if (pkg && !npmSpecIsPinned(pkg))
+      problems.push({
+        level: "warn",
+        code: "mcp-server-unpinned",
+        message: `mcp server '${server}' runs '${pkg}' via npx with no pinned version — pin it ('${pkg}@<version>') so a malicious or breaking upstream update can't auto-ship`,
+      });
   }
 
   if (policy) {

@@ -14,14 +14,14 @@
       "internal_docs": {
         "transport": "stdio",
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/srv/acme/docs"],
+        "args": ["-y", "@modelcontextprotocol/server-filesystem@2025.9.0", "/srv/acme/docs"],
         "mandatory": false,
         "tools": ["read_file", "list_directory", "search_files"]
       },
       "analytics_readonly": {
         "transport": "stdio",
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://analytics_ro@analytics-replica.internal:5432/acme_analytics"],
+        "args": ["-y", "@modelcontextprotocol/server-postgres@2025.9.0", "postgresql://analytics_ro@analytics-replica.internal:5432/acme_analytics"],
         "secrets": { "PGPASSWORD": "acme-analytics-ro" },
         "mandatory": false,
         "tools": ["query"]

@@ -132,6 +132,54 @@ test("a mandatory MCP server with every declared tool denied is a warning", asyn
   expect(codes(report.problems)).toContain("mandatory-mcp-all-denied");
 });
 
+test("an unpinned npx MCP server is a supply-chain warning; a pinned one is not", async () => {
+  const unpinned = writeDef(
+    baseManifest({
+      mcp: {
+        servers: {
+          fs: {
+            transport: "stdio",
+            command: "npx",
+            args: ["-y", "@modelcontextprotocol/server-filesystem", "/docs"],
+          },
+        },
+      },
+    }),
+  );
+  const rUnpinned = await runDoctor(unpinned);
+  expect(codes(rUnpinned.problems)).toContain("mcp-server-unpinned");
+  expect(rUnpinned.ok).toBe(true); // warning only
+
+  const pinned = writeDef(
+    baseManifest({
+      mcp: {
+        servers: {
+          fs: {
+            transport: "stdio",
+            command: "npx",
+            args: ["-y", "@modelcontextprotocol/server-filesystem@2025.9.0", "/docs"],
+          },
+        },
+      },
+    }),
+  );
+  expect(codes((await runDoctor(pinned)).problems)).not.toContain("mcp-server-unpinned");
+});
+
+test("the unpinned check ignores http servers and non-npx commands", async () => {
+  const dir = writeDef(
+    baseManifest({
+      mcp: {
+        servers: {
+          remote: { transport: "http", url: "https://x.internal" },
+          local: { transport: "stdio", command: "/usr/local/bin/my-server", args: ["--port", "0"] },
+        },
+      },
+    }),
+  );
+  expect(codes((await runDoctor(dir)).problems)).not.toContain("mcp-server-unpinned");
+});
+
 test("a parameterized allow rule suppresses the mandatory-mcp-all-denied false positive", async () => {
   // `read(SELECT*)` allows the tool for real (arg-dependent) queries; judging with
   // empty args would wrongly see "deny" and cry "can do nothing". The param-rule

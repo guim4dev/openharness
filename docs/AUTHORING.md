@@ -94,13 +94,15 @@ Deny-by-default, first-match. Enforced in-process at every tool call and model r
 "mcp": { "servers": {
   "internal_docs": {
     "transport": "stdio",
-    "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/docs"],
+    // Pin the version — an unpinned `npx` server fetches "latest" every launch
+    // (supply-chain risk); `openharness doctor` warns when it isn't pinned.
+    "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem@2025.9.0", "/docs"],
     "tools": ["read_file", "list_directory"],   // optional allowlist
     "mandatory": false                            // true → harness fails fast if it can't connect
   },
   "analytics": {
     "transport": "stdio",
-    "command": "npx", "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://ro@db/analytics"],
+    "command": "npx", "args": ["-y", "@modelcontextprotocol/server-postgres@2025.9.0", "postgresql://ro@db/analytics"],
     "secrets": { "PGPASSWORD": "acme-analytics-ro" }   // ENV var → credential REF (never a value)
   },
   "backoffice": {

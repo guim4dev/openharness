@@ -13,7 +13,7 @@
       "back_office": {
         "transport": "stdio",
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-sqlite", "--db-path", "/srv/northwind/ops.db"],
+        "args": ["-y", "@modelcontextprotocol/server-sqlite@2025.9.0", "--db-path", "/srv/northwind/ops.db"],
         "mandatory": false,
         "tools": ["read_query", "list_tables", "describe_table", "write_query", "append_insight"]
       }

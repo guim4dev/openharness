@@ -52,7 +52,8 @@ governed and signed, to a TUI and a desktop app. 254 tests, MIT, built on
   of the loader's structural/reference validation it flags self-consistency
   traps (a model the harness's own policy denies, a missing branding icon, an
   MCP secret in the reserved `api-key:*` namespace, default-deny with no allow
-  rule, a mandatory MCP server whose every tool is denied). Warnings pass;
+  rule, a mandatory MCP server whose every tool is denied, an unpinned `npx` MCP
+  server that would fetch "latest" each launch — a supply-chain risk). Warnings pass;
   error-level problems exit non-zero. `openharness build` runs doctor as a
   preflight and refuses to build on any error, so a broken definition never
   ships as a bundle. CI gates every example harness on a clean doctor run.

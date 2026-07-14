@@ -12,7 +12,7 @@
       "helpdesk": {
         "transport": "stdio",
         "command": "npx",
-        "args": ["-y", "@meridian/mcp-helpdesk", "--endpoint", "https://helpdesk.meridian.internal"],
+        "args": ["-y", "@meridian/mcp-helpdesk@1.4.0", "--endpoint", "https://helpdesk.meridian.internal"],
         "mandatory": false,
         "tools": [
           "search_kb",
