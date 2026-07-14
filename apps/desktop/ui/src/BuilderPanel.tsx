@@ -119,6 +119,86 @@ export function BuilderPanel({ onClose }: { onClose?: () => void }) {
               + Add rule
             </button>
           </fieldset>
+
+          <fieldset className="builder-rules">
+            <legend>Skills</legend>
+            {b.draft.skills.map((skill, i) => (
+              <div className="builder-rule" key={i}>
+                <input
+                  aria-label={`Skill ${i + 1} path`}
+                  value={skill.path}
+                  onChange={(e) => b.updateSkill(i, { path: e.target.value })}
+                  placeholder="skills/triage"
+                />
+                <label className="builder-check">
+                  <input
+                    type="checkbox"
+                    aria-label={`Skill ${i + 1} mandatory`}
+                    checked={skill.mandatory}
+                    onChange={(e) => b.updateSkill(i, { mandatory: e.target.checked })}
+                  />
+                  mandatory
+                </label>
+                <button type="button" aria-label={`Remove skill ${i + 1}`} onClick={() => b.removeSkill(i)}>
+                  ✕
+                </button>
+              </div>
+            ))}
+            <button type="button" className="builder-add-rule" onClick={() => b.addSkill()}>
+              + Add skill
+            </button>
+          </fieldset>
+
+          <fieldset className="builder-rules">
+            <legend>MCP servers</legend>
+            {b.draft.mcpServers.map((srv, i) => (
+              <div className="builder-mcp" key={i}>
+                <div className="builder-rule">
+                  <input
+                    aria-label={`MCP ${i + 1} name`}
+                    value={srv.name}
+                    onChange={(e) => b.updateMcp(i, { name: e.target.value })}
+                    placeholder="github"
+                  />
+                  <select
+                    aria-label={`MCP ${i + 1} transport`}
+                    value={srv.transport}
+                    onChange={(e) => b.updateMcp(i, { transport: e.target.value as "stdio" | "http" })}
+                  >
+                    <option value="stdio">stdio</option>
+                    <option value="http">http</option>
+                  </select>
+                  <button type="button" aria-label={`Remove MCP server ${i + 1}`} onClick={() => b.removeMcp(i)}>
+                    ✕
+                  </button>
+                </div>
+                {srv.transport === "stdio" ? (
+                  <input
+                    aria-label={`MCP ${i + 1} command`}
+                    value={srv.command}
+                    onChange={(e) => b.updateMcp(i, { command: e.target.value })}
+                    placeholder="npx -y @scope/server@1.2.3 (pin the version)"
+                  />
+                ) : (
+                  <input
+                    aria-label={`MCP ${i + 1} url`}
+                    value={srv.url}
+                    onChange={(e) => b.updateMcp(i, { url: e.target.value })}
+                    placeholder="https://mcp.acme.internal"
+                  />
+                )}
+                <input
+                  aria-label={`MCP ${i + 1} tools`}
+                  value={srv.tools}
+                  onChange={(e) => b.updateMcp(i, { tools: e.target.value })}
+                  placeholder="tool allowlist, comma-separated (empty = all)"
+                />
+              </div>
+            ))}
+            <button type="button" className="builder-add-rule" onClick={() => b.addMcp()}>
+              + Add MCP server
+            </button>
+          </fieldset>
         </form>
 
         <aside className="builder-output" aria-label="Generated files">

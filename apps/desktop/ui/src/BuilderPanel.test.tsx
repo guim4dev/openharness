@@ -39,6 +39,31 @@ test("a bad accent surfaces a field-specific problem", () => {
   expect(within(problems).getByText(/accent:/)).toBeTruthy();
 });
 
+test("adding a skill and an MCP server flows into the live harness.json", () => {
+  render(<BuilderPanel />);
+  fireEvent.click(screen.getByText("+ Add skill"));
+  fireEvent.change(screen.getByLabelText("Skill 1 path"), { target: { value: "skills/triage" } });
+
+  fireEvent.click(screen.getByText("+ Add MCP server"));
+  fireEvent.change(screen.getByLabelText("MCP 1 name"), { target: { value: "github" } });
+  fireEvent.change(screen.getByLabelText("MCP 1 command"), { target: { value: "npx -y srv@1.2.3" } });
+
+  const manifest = screen.getByLabelText("harness.json preview");
+  expect(manifest.textContent).toContain('"path": "skills/triage"');
+  expect(manifest.textContent).toContain('"github"');
+  expect(manifest.textContent).toContain('"transport": "stdio"');
+});
+
+test("switching an MCP server to http swaps the command field for a url field", () => {
+  render(<BuilderPanel />);
+  fireEvent.click(screen.getByText("+ Add MCP server"));
+  // stdio by default -> a command field is shown.
+  expect(screen.getByLabelText("MCP 1 command")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("MCP 1 transport"), { target: { value: "http" } });
+  // now a url field replaces it.
+  expect(screen.getByLabelText("MCP 1 url")).toBeTruthy();
+});
+
 test("the Back to chat control fires onClose", () => {
   let closed = false;
   render(<BuilderPanel onClose={() => (closed = true)} />);

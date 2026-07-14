@@ -11,10 +11,27 @@ import { useCallback, useMemo, useReducer } from "react";
  */
 
 export type PolicyAction = "allow" | "deny" | "ask";
+export type McpTransport = "stdio" | "http";
 
 export interface BuilderRule {
   match: string;
   action: PolicyAction;
+}
+
+export interface BuilderSkill {
+  path: string;
+  mandatory: boolean;
+}
+
+export interface BuilderMcpServer {
+  name: string;
+  transport: McpTransport;
+  /** stdio: launch command (a runner like `npx` should pin its target). */
+  command: string;
+  /** http: endpoint URL. */
+  url: string;
+  /** Comma-separated tool allowlist; empty = expose all the server offers. */
+  tools: string;
 }
 
 export interface BuilderDraft {
@@ -30,6 +47,8 @@ export interface BuilderDraft {
   credentialProfile: string;
   policyDefault: PolicyAction;
   rules: BuilderRule[];
+  skills: BuilderSkill[];
+  mcpServers: BuilderMcpServer[];
 }
 
 export const emptyDraft: BuilderDraft = {
@@ -42,6 +61,8 @@ export const emptyDraft: BuilderDraft = {
   credentialProfile: "work",
   policyDefault: "deny",
   rules: [],
+  skills: [],
+  mcpServers: [],
 };
 
 export type BuilderScalarField =
@@ -59,21 +80,44 @@ export type BuilderAction =
   | { type: "addRule" }
   | { type: "updateRule"; index: number; patch: Partial<BuilderRule> }
   | { type: "removeRule"; index: number }
+  | { type: "addSkill" }
+  | { type: "updateSkill"; index: number; patch: Partial<BuilderSkill> }
+  | { type: "removeSkill"; index: number }
+  | { type: "addMcp" }
+  | { type: "updateMcp"; index: number; patch: Partial<BuilderMcpServer> }
+  | { type: "removeMcp"; index: number }
   | { type: "load"; draft: BuilderDraft };
+
+const NEW_RULE: BuilderRule = { match: "", action: "deny" };
+const NEW_SKILL: BuilderSkill = { path: "", mandatory: true };
+const NEW_MCP: BuilderMcpServer = { name: "", transport: "stdio", command: "", url: "", tools: "" };
+
+function replaceAt<T>(list: T[], index: number, patch: Partial<T>): T[] {
+  return list.map((item, i) => (i === index ? { ...item, ...patch } : item));
+}
 
 export function builderReducer(draft: BuilderDraft, action: BuilderAction): BuilderDraft {
   switch (action.type) {
     case "setField":
       return { ...draft, [action.field]: action.value };
     case "addRule":
-      return { ...draft, rules: [...draft.rules, { match: "", action: "deny" }] };
+      return { ...draft, rules: [...draft.rules, { ...NEW_RULE }] };
     case "updateRule":
-      return {
-        ...draft,
-        rules: draft.rules.map((r, i) => (i === action.index ? { ...r, ...action.patch } : r)),
-      };
+      return { ...draft, rules: replaceAt(draft.rules, action.index, action.patch) };
     case "removeRule":
       return { ...draft, rules: draft.rules.filter((_, i) => i !== action.index) };
+    case "addSkill":
+      return { ...draft, skills: [...draft.skills, { ...NEW_SKILL }] };
+    case "updateSkill":
+      return { ...draft, skills: replaceAt(draft.skills, action.index, action.patch) };
+    case "removeSkill":
+      return { ...draft, skills: draft.skills.filter((_, i) => i !== action.index) };
+    case "addMcp":
+      return { ...draft, mcpServers: [...draft.mcpServers, { ...NEW_MCP }] };
+    case "updateMcp":
+      return { ...draft, mcpServers: replaceAt(draft.mcpServers, action.index, action.patch) };
+    case "removeMcp":
+      return { ...draft, mcpServers: draft.mcpServers.filter((_, i) => i !== action.index) };
     case "load":
       return { ...action.draft };
     default:
@@ -81,18 +125,39 @@ export function builderReducer(draft: BuilderDraft, action: BuilderAction): Buil
   }
 }
 
+/** Parse a comma-separated tool allowlist into a trimmed, non-empty array. */
+function parseTools(csv: string): string[] {
+  return csv
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
 /** The `harness.json` object for a draft (systemPrompt lives in a sibling file). */
 export function draftToManifest(draft: BuilderDraft): Record<string, unknown> {
-  return {
+  const manifest: Record<string, unknown> = {
     name: draft.name,
     version: "0.1.0",
     branding: { displayName: draft.displayName, accent: draft.accent },
     systemPrompt: "system-prompt.md",
-    skills: [],
+    skills: draft.skills.map((s) => ({ path: s.path, mandatory: s.mandatory })),
     providers: {
       default: { provider: draft.provider, model: draft.model, credentialProfile: draft.credentialProfile },
     },
   };
+  if (draft.mcpServers.length > 0) {
+    const servers: Record<string, unknown> = {};
+    for (const m of draft.mcpServers) {
+      const tools = parseTools(m.tools);
+      servers[m.name] = {
+        transport: m.transport,
+        ...(m.transport === "stdio" ? { command: m.command } : { url: m.url }),
+        ...(tools.length > 0 ? { tools } : {}),
+      };
+    }
+    manifest.mcp = { servers };
+  }
+  return manifest;
 }
 
 /** The `policy.json` object for a draft. */
@@ -113,6 +178,8 @@ export function draftFromManifest(
   const providers = (manifest.providers ?? {}) as Record<string, unknown>;
   const def = (providers.default ?? {}) as Record<string, unknown>;
   const rawRules = Array.isArray(policy?.rules) ? (policy!.rules as Record<string, unknown>[]) : [];
+  const rawSkills = Array.isArray(manifest.skills) ? (manifest.skills as Record<string, unknown>[]) : [];
+  const mcpServers = ((manifest.mcp as Record<string, unknown>)?.servers ?? {}) as Record<string, Record<string, unknown>>;
   return {
     name: String(manifest.name ?? ""),
     displayName: String(branding.displayName ?? ""),
@@ -123,6 +190,14 @@ export function draftFromManifest(
     credentialProfile: String(def.credentialProfile ?? emptyDraft.credentialProfile),
     policyDefault: (policy?.default as PolicyAction) ?? "deny",
     rules: rawRules.map((r) => ({ match: String(r.match ?? ""), action: (r.action as PolicyAction) ?? "deny" })),
+    skills: rawSkills.map((s) => ({ path: String(s.path ?? ""), mandatory: Boolean(s.mandatory) })),
+    mcpServers: Object.entries(mcpServers).map(([name, spec]) => ({
+      name,
+      transport: (spec.transport as McpTransport) ?? "stdio",
+      command: String(spec.command ?? ""),
+      url: String(spec.url ?? ""),
+      tools: Array.isArray(spec.tools) ? (spec.tools as string[]).join(", ") : "",
+    })),
   };
 }
 
@@ -139,7 +214,7 @@ export interface BuilderProblem {
  */
 export function validateDraft(draft: BuilderDraft): BuilderProblem[] {
   const problems: BuilderProblem[] = [];
-  const req = (v: string, field: BuilderScalarField, label: string) => {
+  const req = (v: string, field: string, label: string) => {
     if (!v.trim()) problems.push({ field, message: `${label} is required.` });
   };
   req(draft.name, "name", "Name");
@@ -154,6 +229,17 @@ export function validateDraft(draft: BuilderDraft): BuilderProblem[] {
   req(draft.credentialProfile, "credentialProfile", "Credential profile");
   draft.rules.forEach((r, i) => {
     if (!r.match.trim()) problems.push({ field: `rules.${i}.match`, message: `Rule ${i + 1} needs a match pattern.` });
+  });
+  draft.skills.forEach((s, i) => {
+    if (!s.path.trim()) problems.push({ field: `skills.${i}.path`, message: `Skill ${i + 1} needs a path.` });
+  });
+  const seen = new Set<string>();
+  draft.mcpServers.forEach((m, i) => {
+    if (!m.name.trim()) problems.push({ field: `mcp.${i}.name`, message: `MCP server ${i + 1} needs a name.` });
+    else if (seen.has(m.name)) problems.push({ field: `mcp.${i}.name`, message: `MCP server name '${m.name}' is duplicated.` });
+    else seen.add(m.name);
+    if (m.transport === "stdio") req(m.command, `mcp.${i}.command`, `MCP server ${i + 1} command`);
+    else req(m.url, `mcp.${i}.url`, `MCP server ${i + 1} URL`);
   });
   // Mirror doctor's "deny default with no allow/ask" trap.
   if (draft.policyDefault === "deny" && draft.rules.length > 0 && !draft.rules.some((r) => r.action !== "deny"))
@@ -178,6 +264,12 @@ export interface UseBuilder {
   addRule: () => void;
   updateRule: (index: number, patch: Partial<BuilderRule>) => void;
   removeRule: (index: number) => void;
+  addSkill: () => void;
+  updateSkill: (index: number, patch: Partial<BuilderSkill>) => void;
+  removeSkill: (index: number) => void;
+  addMcp: () => void;
+  updateMcp: (index: number, patch: Partial<BuilderMcpServer>) => void;
+  removeMcp: (index: number) => void;
   load: (draft: BuilderDraft) => void;
 }
 
@@ -201,6 +293,12 @@ export function useBuilder(initial: BuilderDraft = emptyDraft): UseBuilder {
     addRule: useCallback(() => dispatch({ type: "addRule" }), []),
     updateRule: useCallback((index, patch) => dispatch({ type: "updateRule", index, patch }), []),
     removeRule: useCallback((index) => dispatch({ type: "removeRule", index }), []),
+    addSkill: useCallback(() => dispatch({ type: "addSkill" }), []),
+    updateSkill: useCallback((index, patch) => dispatch({ type: "updateSkill", index, patch }), []),
+    removeSkill: useCallback((index) => dispatch({ type: "removeSkill", index }), []),
+    addMcp: useCallback(() => dispatch({ type: "addMcp" }), []),
+    updateMcp: useCallback((index, patch) => dispatch({ type: "updateMcp", index, patch }), []),
+    removeMcp: useCallback((index) => dispatch({ type: "removeMcp", index }), []),
     load: useCallback((d) => dispatch({ type: "load", draft: d }), []),
   };
 }

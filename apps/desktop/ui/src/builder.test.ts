@@ -29,6 +29,8 @@ const filled: BuilderDraft = {
   credentialProfile: "work",
   policyDefault: "deny",
   rules: [{ match: "mcp__github__*", action: "ask" }],
+  skills: [{ path: "skills/triage", mandatory: true }],
+  mcpServers: [{ name: "github", transport: "stdio", command: "npx", url: "", tools: "list_issues, create_issue" }],
 };
 
 describe("builderReducer", () => {
@@ -72,6 +74,33 @@ describe("serialization", () => {
     expect(draftToPolicy(filled)).toEqual({ default: "deny", rules: [{ match: "mcp__github__*", action: "ask" }] });
   });
 
+  test("serializes skills and MCP servers (tools CSV -> array; empty tools omitted)", () => {
+    const m = draftToManifest(filled) as {
+      skills: { path: string; mandatory: boolean }[];
+      mcp: { servers: Record<string, { transport: string; command?: string; tools?: string[] }> };
+    };
+    expect(m.skills).toEqual([{ path: "skills/triage", mandatory: true }]);
+    expect(m.mcp.servers.github.transport).toBe("stdio");
+    expect(m.mcp.servers.github.command).toBe("npx");
+    expect(m.mcp.servers.github.tools).toEqual(["list_issues", "create_issue"]);
+  });
+
+  test("omits the mcp section entirely when no servers are declared", () => {
+    const m = draftToManifest({ ...filled, mcpServers: [] }) as Record<string, unknown>;
+    expect(m.mcp).toBeUndefined();
+  });
+
+  test("an http MCP server serializes url (not command)", () => {
+    const draft: BuilderDraft = {
+      ...filled,
+      mcpServers: [{ name: "remote", transport: "http", command: "", url: "https://mcp.acme.internal", tools: "" }],
+    };
+    const m = draftToManifest(draft) as { mcp: { servers: Record<string, { url?: string; command?: string; tools?: string[] }> } };
+    expect(m.mcp.servers.remote.url).toBe("https://mcp.acme.internal");
+    expect(m.mcp.servers.remote.command).toBeUndefined();
+    expect(m.mcp.servers.remote.tools).toBeUndefined(); // empty allowlist omitted
+  });
+
   test("round-trips: manifest+policy -> draft -> manifest+policy", () => {
     const manifest = draftToManifest(filled);
     const policy = draftToPolicy(filled);
@@ -100,6 +129,34 @@ describe("validateDraft", () => {
   test("flags a rule with no match pattern", () => {
     const d: BuilderDraft = { ...filled, rules: [{ match: "", action: "deny" }] };
     expect(validateDraft(d).some((p) => p.field === "rules.0.match")).toBe(true);
+  });
+
+  test("flags a skill with no path", () => {
+    const d: BuilderDraft = { ...filled, skills: [{ path: "", mandatory: true }] };
+    expect(validateDraft(d).some((p) => p.field === "skills.0.path")).toBe(true);
+  });
+
+  test("flags an MCP server missing its transport-required field, and a duplicate name", () => {
+    const stdioNoCmd: BuilderDraft = {
+      ...filled,
+      mcpServers: [{ name: "x", transport: "stdio", command: "", url: "", tools: "" }],
+    };
+    expect(validateDraft(stdioNoCmd).some((p) => p.field === "mcp.0.command")).toBe(true);
+
+    const httpNoUrl: BuilderDraft = {
+      ...filled,
+      mcpServers: [{ name: "y", transport: "http", command: "", url: "", tools: "" }],
+    };
+    expect(validateDraft(httpNoUrl).some((p) => p.field === "mcp.0.url")).toBe(true);
+
+    const dupes: BuilderDraft = {
+      ...filled,
+      mcpServers: [
+        { name: "dup", transport: "stdio", command: "npx", url: "", tools: "" },
+        { name: "dup", transport: "stdio", command: "npx", url: "", tools: "" },
+      ],
+    };
+    expect(validateDraft(dupes).some((p) => /duplicated/.test(p.message))).toBe(true);
   });
 
   test("mirrors doctor's deny-default-with-no-allow trap", () => {
