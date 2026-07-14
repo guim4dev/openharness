@@ -45,6 +45,9 @@ struct SidecarPaths {
     working_dir: PathBuf,
     /// Verified-boot inputs `(bundle, org_pubkey)` — release only.
     verified: Option<(PathBuf, PathBuf)>,
+    /// Anti-rollback floor file (min-version.txt) baked beside the bundle —
+    /// release only. Its contents become `OH_MIN_VERSION` for the sidecar.
+    min_version: Option<PathBuf>,
     /// Local dev harness dir default — debug only.
     dev_harness: Option<PathBuf>,
 }
@@ -57,6 +60,8 @@ struct SidecarPaths {
 ///   OH_HARNESS_PATH     dev-boot harness dir (debug default: harnesses/example)
 ///   OH_BUNDLE_PATH      signed bundle for verified boot (release default: resources)
 ///   OH_ORG_PUBKEY_PATH  org pubkey for verified boot (release default: resources)
+///   OH_MIN_VERSION      anti-rollback floor for verified boot (release default: read
+///                       from the baked resources/min-version.txt)
 ///   OPENHARNESS_APP_ID  config-dir namespace (default: this build's Tauri `identifier`).
 ///                       Manual override is for advanced/test use only — a normal build
 ///                       should rely on the Tauri identifier so branded builds (each with
@@ -97,6 +102,21 @@ fn spawn_sidecar(app_id: &str, paths: &SidecarPaths) -> std::io::Result<Child> {
         }
         if std::env::var_os("OH_ORG_PUBKEY_PATH").is_none() {
             cmd.env("OH_ORG_PUBKEY_PATH", pubkey);
+        }
+    }
+
+    // Anti-rollback floor: read the baked min-version.txt and pass its trimmed
+    // contents as OH_MIN_VERSION so the sidecar refuses an older (but still
+    // org-signed) bundle. A missing/unreadable file leaves the floor unset (the
+    // signature + hash gates still apply), matching the "optional" contract.
+    if let Some(path) = &paths.min_version {
+        if std::env::var_os("OH_MIN_VERSION").is_none() {
+            if let Ok(contents) = std::fs::read_to_string(path) {
+                let trimmed = contents.trim();
+                if !trimmed.is_empty() {
+                    cmd.env("OH_MIN_VERSION", trimmed);
+                }
+            }
         }
     }
 
@@ -159,6 +179,7 @@ fn main() {
                 default_entry: root.join("apps/desktop/src/server.ts"),
                 working_dir: root.clone(),
                 verified: None,
+                min_version: None,
                 dev_harness: Some(root.join("harnesses/example")),
             }
         };
@@ -168,6 +189,7 @@ fn main() {
             SidecarPaths {
                 default_entry: res.join("server.mjs"),
                 verified: Some((res.join("harness.ohbundle"), res.join("org.pub"))),
+                min_version: Some(res.join("min-version.txt")),
                 dev_harness: None,
                 working_dir: res,
             }

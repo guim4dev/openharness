@@ -43,8 +43,14 @@ export interface CreateLiveSessionOptions {
    * read from `pubkeyPath`, and every bundled file's hash must match; otherwise
    * a `BundleVerificationError` is thrown before any session is created
    * (fail-closed). Takes precedence over `harnessPath`.
+   *
+   * `minVersion` is the optional anti-rollback floor: a validly-signed bundle
+   * whose version is OLDER than this is refused (`BundleVerificationError`), so
+   * an attacker with write access to the resource dir cannot swap in an older
+   * but still org-signed bundle carrying a more permissive past policy. Omit it
+   * for dev / no-floor boots (the signature + hash gates still apply).
    */
-  verified?: { bundlePath: string; pubkeyPath: string };
+  verified?: { bundlePath: string; pubkeyPath: string; minVersion?: string };
   manager: CredentialManager;
   registry: AuthProviderRegistry;
   /** Credential profile to drive rotation against. */
@@ -124,14 +130,16 @@ export interface LiveSession {
  * hash must match, or `loadVerifiedDefinition` throws `BundleVerificationError`.
  * That error is left to propagate UNCHANGED so a caller (e.g. the desktop
  * sidecar) can distinguish an integrity failure from an ordinary startup error
- * and refuse to boot. Without `verified`, the local dir is loaded unverified.
+ * and refuse to boot. When `verified.minVersion` is set it is passed through as
+ * the anti-rollback floor, so a validly-signed but stale bundle is refused too.
+ * Without `verified`, the local dir is loaded unverified.
  */
 async function resolveDefinition(opts: CreateLiveSessionOptions): Promise<HarnessDefinition> {
   if (opts.verified) {
-    // TODO(rollback): enforce an anti-rollback minVersion here so a validly-signed but stale bundle can't be replayed.
     return loadVerifiedDefinition(
       opts.verified.bundlePath,
       readFileSync(opts.verified.pubkeyPath, "utf8"),
+      opts.verified.minVersion ? { minVersion: opts.verified.minVersion } : {},
     );
   }
   if (opts.harnessPath) return loadHarnessDefinition(opts.harnessPath);
