@@ -1,7 +1,7 @@
 import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { HarnessDefinitionError, loadHarnessDefinition } from "@openharness/definition";
-import { checkModel, decideTool } from "@openharness/policy";
+import { checkModel, decideTool, globMatch } from "@openharness/policy";
 
 /**
  * `openharness doctor` — preflight a HarnessDefinition without building it.
@@ -95,33 +95,48 @@ export async function runDoctor(defDir: string): Promise<DoctorReport> {
   }
 
   if (policy) {
-    // 4. A provider profile's model is denied by the harness's OWN policy.models
-    //    — the harness cannot run the model it is configured to use.
+    // 4. A provider profile's model is denied by the harness's OWN policy.models.
+    //    The DEFAULT profile is gated at session start, so a denied default can't
+    //    even start the harness → error. A non-default profile is only gated on
+    //    an explicit switch, so a denied one is a latent misconfig → warn.
     for (const [profile, cfg] of Object.entries(manifest.providers)) {
-      if (checkModel(policy, cfg.provider, cfg.model) === "deny")
-        problems.push({
-          level: "error",
-          code: "model-denied-by-own-policy",
-          message: `provider profile '${profile}' uses ${cfg.provider}/${cfg.model}, which this harness's own policy.models denies`,
-        });
+      if (checkModel(policy, cfg.provider, cfg.model) !== "deny") continue;
+      const isDefault = profile === "default";
+      problems.push({
+        level: isDefault ? "error" : "warn",
+        code: "model-denied-by-own-policy",
+        message: isDefault
+          ? `provider profile 'default' uses ${cfg.provider}/${cfg.model}, which this harness's own policy.models denies — it cannot start`
+          : `provider profile '${profile}' uses ${cfg.provider}/${cfg.model}, which this harness's own policy.models denies — it would fail if switched to`,
+      });
     }
 
-    // 5. default "deny" with no allow rule anywhere — the harness can run no tool.
-    if (policy.default === "deny" && !policy.rules.some((r) => r.action === "allow"))
+    // 5. default "deny" with no allow OR ask rule anywhere — the harness can run
+    //    no tool at all. `ask` counts as usable: an ask-matched tool prompts a
+    //    human and runs on approval, so a policy with `ask` rules is NOT deny-all.
+    if (policy.default === "deny" && !policy.rules.some((r) => r.action === "allow" || r.action === "ask"))
       problems.push({
         level: "warn",
         code: "deny-all",
-        message: `policy default is "deny" and no rule allows anything — the harness can run no tools`,
+        message: `policy default is "deny" and no rule allows or asks — the harness can run no tools`,
       });
 
-    // 6. A mandatory MCP server whose EVERY declared tool is denied by policy
-    //    (name-level, empty args). It must connect yet can do nothing — almost
-    //    always a mistake. Servers without a `tools` allowlist are skipped (we
-    //    can't enumerate what they'd expose).
+    // 6. A mandatory MCP server whose EVERY declared tool is denied by policy.
+    //    It must connect yet can do nothing — almost always a mistake. Judged
+    //    with empty args, so a PARAMETERIZED rule (`tool(<glob>)`) — which decides
+    //    on arg content we don't have at preflight — would mis-call it. Skip the
+    //    check for a server any of whose tools a parameterized rule targets (bias
+    //    to a missed warning over a false one). Servers without a `tools`
+    //    allowlist are skipped too (we can't enumerate what they'd expose).
+    const paramRuleTargets = (tool: string): boolean =>
+      policy.rules.some(
+        (r) => r.match.includes("(") && globMatch(r.match.replace(/\(.*\)$/s, "").trim(), tool),
+      );
     for (const [server, spec] of Object.entries(manifest.mcp?.servers ?? {})) {
       if (!spec.mandatory) continue;
       const tools = spec.tools ?? [];
       if (tools.length === 0) continue;
+      if (tools.some((t) => paramRuleTargets(`mcp__${server}__${t}`))) continue;
       const allDenied = tools.every((t) => decideTool(policy, `mcp__${server}__${t}`, {}).decision === "deny");
       if (allDenied)
         problems.push({

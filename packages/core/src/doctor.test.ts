@@ -66,11 +66,33 @@ test("a model denied by the harness's OWN policy is an error", async () => {
   expect(codes(report.problems)).toContain("model-denied-by-own-policy");
 });
 
-test("default-deny with no allow rule is a warning, not an error", async () => {
-  const dir = writeDef(baseManifest(), { default: "deny", rules: [{ match: "read", action: "ask" }] });
+test("default-deny with no allow/ask rule is a warning, not an error", async () => {
+  const dir = writeDef(baseManifest(), { default: "deny", rules: [] });
   const report = await runDoctor(dir);
   expect(codes(report.problems)).toContain("deny-all");
   expect(report.ok).toBe(true); // warning only
+});
+
+test("default-deny with only ask rules does NOT warn deny-all (ask tools run on approval)", async () => {
+  const dir = writeDef(baseManifest(), { default: "deny", rules: [{ match: "read", action: "ask" }] });
+  const report = await runDoctor(dir);
+  expect(codes(report.problems)).not.toContain("deny-all");
+  expect(report.ok).toBe(true);
+});
+
+test("a non-default provider profile denied by policy is a WARNING (not a build-blocking error)", async () => {
+  const dir = writeDef(
+    baseManifest({
+      providers: {
+        default: { provider: "anthropic", model: "claude-sonnet-5", credentialProfile: "work" },
+        cheap: { provider: "openai", model: "gpt-5-mini", credentialProfile: "batch" },
+      },
+    }),
+    { default: "allow", rules: [], models: { allow: ["anthropic/claude-*"] } },
+  );
+  const report = await runDoctor(dir);
+  expect(codes(report.problems)).toContain("model-denied-by-own-policy");
+  expect(report.ok).toBe(true); // non-default → warn, so ok stays true
 });
 
 test("a referenced branding.icon that does not exist is an error", async () => {
@@ -108,4 +130,22 @@ test("a mandatory MCP server with every declared tool denied is a warning", asyn
   );
   const report = await runDoctor(dir);
   expect(codes(report.problems)).toContain("mandatory-mcp-all-denied");
+});
+
+test("a parameterized allow rule suppresses the mandatory-mcp-all-denied false positive", async () => {
+  // `read(SELECT*)` allows the tool for real (arg-dependent) queries; judging with
+  // empty args would wrongly see "deny" and cry "can do nothing". The param-rule
+  // guard must skip the check here.
+  const dir = writeDef(
+    baseManifest({
+      mcp: {
+        servers: {
+          db: { transport: "stdio", command: "npx", args: ["-y", "srv"], mandatory: true, tools: ["read"] },
+        },
+      },
+    }),
+    { default: "deny", rules: [{ match: "mcp__db__read(SELECT*)", action: "allow" }] },
+  );
+  const report = await runDoctor(dir);
+  expect(codes(report.problems)).not.toContain("mandatory-mcp-all-denied");
 });
