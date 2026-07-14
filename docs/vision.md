@@ -10,7 +10,7 @@ Last updated: 2026-07-14 (after an autonomous build night).
 
 ## 0. Current state (what's actually built)
 
-On `main`, **336 tests green**, typecheck + `cargo check` green. A cross-cutting
+On `main`, **344 tests green**, typecheck + `cargo check` green. A cross-cutting
 integration test proves MCP + policy + audit compose end-to-end in one live
 session, and adversarial review passes hardened the security claims (honest
 audit-integrity framing + server-side chain verification, policy fails loud on a
@@ -73,6 +73,9 @@ gateway's pinned tools into the live session as `mcp__<gateway>__<tool>`,
 fail-closed at boot when the declared gateway is unreachable. Proven over real
 loopback HTTP: an allowed call runs through the full pipeline (audited), a client
 without DPoP is refused at the edge, a denied tool never reaches the upstream.
+It is **runnable**: `openharness-gateway serve <config.json>` boots the whole
+pipeline from a zod-validated config (keys, policy, pinned catalog, connectors)
+against a machine-local encrypted secret store.
 **Deferred:** gateway deploy hardening (real IdP/token-exchange flow, KMS-backed
 broker, containerized connector sandbox); final `tauri build` + fresh-account
 validation (manual); OS code-signing; a builder UI; cloud. (OpenConnector §13 may

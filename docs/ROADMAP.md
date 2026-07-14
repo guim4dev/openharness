@@ -83,9 +83,11 @@ party, and the employee's machine never sees the secret.
 > every request at the edge with DPoP (token + request-bound proof + key-binding,
 > no passthrough, no session affinity); core bridges the pinned tools into the
 > live session as `mcp__<gateway>__<tool>`, fail-closed at boot when the declared
-> gateway is unreachable. Proven over real loopback HTTP end to end. **Remaining:**
-> deploy hardening — a real IdP/token-exchange flow, a KMS-backed broker, a
-> containerized connector sandbox. The connector/broker layer is behind swappable
+> gateway is unreachable. Proven over real loopback HTTP end to end, and
+> **runnable** — `openharness-gateway serve <config.json>` boots the pipeline from
+> a zod-validated config against a machine-local encrypted secret store.
+> **Remaining:** deploy hardening — a real IdP/token-exchange flow, a KMS-backed
+> broker, a containerized connector sandbox. The connector/broker layer is behind swappable
 > interfaces so [OpenConnector](vision.md#13) can slot in as the backend once it
 > matures.
 
