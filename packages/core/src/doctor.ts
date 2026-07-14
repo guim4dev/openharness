@@ -251,6 +251,26 @@ export async function runDoctor(defDir: string, opts: RunDoctorOptions = {}): Pr
           message: `mandatory mcp server '${server}' has all ${tools.length} declared tool(s) denied by policy — it must connect but can do nothing`,
         });
     }
+
+    // 7. MCP egress ungoverned: a policy is in effect and MCP servers are
+    //    declared, but the default is `allow` and NO rule governs `mcp__*`, so
+    //    every bridged MCP tool reaches external systems on default-allow. The
+    //    author clearly cares about governance (there IS a policy) yet left the
+    //    egress surface open — nudge explicit `mcp__*` rules. Narrow trigger
+    //    (default-allow + zero mcp rules) keeps this from firing on a policy that
+    //    already governs MCP or that is deny-by-default.
+    const hasMcpServers = Object.keys(manifest.mcp?.servers ?? {}).length > 0;
+    const governsMcp = policy.rules.some((r) => {
+      const m = r.match.replace(/\(.*\)$/s, "").trim();
+      return m.startsWith("mcp__") || globMatch(m, "mcp__example__tool");
+    });
+    if (hasMcpServers && policy.default === "allow" && !governsMcp)
+      problems.push({
+        level: "warn",
+        code: "mcp-egress-ungoverned",
+        message:
+          "MCP servers are declared but the policy leaves mcp__* on default-allow (no rule governs MCP egress) — those tools reach external systems ungoverned; add explicit mcp__* rules",
+      });
   }
 
   const ok = !problems.some((p) => p.level === "error");

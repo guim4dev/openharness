@@ -224,6 +224,37 @@ test("the unpinned check spans npm-family, PyPI, and container runners", async (
   ).toBe(false);
 });
 
+test("warns when MCP servers are declared but the policy leaves mcp__* on default-allow", async () => {
+  const server = { transport: "stdio" as const, command: "npx", args: ["-y", "srv@1.2.3"], tools: ["do_thing"] };
+  // default allow + MCP server + NO mcp__* rule -> ungoverned egress warning.
+  const ungoverned = writeDef(baseManifest({ mcp: { servers: { s: server } } }), {
+    default: "allow",
+    rules: [{ match: "bash", action: "deny" }],
+  });
+  expect(codes((await runDoctor(ungoverned)).problems)).toContain("mcp-egress-ungoverned");
+
+  // An explicit mcp__* rule governs the egress -> no warning.
+  const governed = writeDef(baseManifest({ mcp: { servers: { s: server } } }), {
+    default: "allow",
+    rules: [{ match: "mcp__s__*", action: "ask" }],
+  });
+  expect(codes((await runDoctor(governed)).problems)).not.toContain("mcp-egress-ungoverned");
+
+  // deny-by-default already governs MCP -> no warning.
+  const denyDefault = writeDef(baseManifest({ mcp: { servers: { s: server } } }), {
+    default: "deny",
+    rules: [{ match: "mcp__s__do_thing", action: "allow" }],
+  });
+  expect(codes((await runDoctor(denyDefault)).problems)).not.toContain("mcp-egress-ungoverned");
+
+  // A catch-all rule governs everything incl. MCP -> no warning.
+  const catchAll = writeDef(baseManifest({ mcp: { servers: { s: server } } }), {
+    default: "allow",
+    rules: [{ match: "*", action: "ask" }],
+  });
+  expect(codes((await runDoctor(catchAll)).problems)).not.toContain("mcp-egress-ungoverned");
+});
+
 test("strictSupplyChain escalates an unpinned MCP server from warning to a build-failing error", async () => {
   const dir = writeDef(
     baseManifest({ mcp: { servers: { s: { transport: "stdio", command: "npx", args: ["-y", "srv"] } } } }),
