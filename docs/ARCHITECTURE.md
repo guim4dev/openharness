@@ -103,5 +103,7 @@ Tauri updater signature (later), OS code-signing (later).
 
 Local-first enforcement is bypassable by a determined employee with a debugger.
 Signed builds + hash-chained audit make tampering **evident**; the (roadmap)
-remote MCP gateway — org secrets server-side — makes it **pointless**. See
-[`SECURITY.md`](../SECURITY.md).
+remote MCP gateway — org secrets server-side — **confines and audits the blast
+radius** (a compromised endpoint means abuse limited to one user's policy scope,
+not stolen org credentials — a patched binary still holds a valid session, so
+this bounds bypass rather than eliminating it). See [`SECURITY.md`](../SECURITY.md).

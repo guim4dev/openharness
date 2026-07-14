@@ -131,8 +131,10 @@ SSO, remote MCP gateway, audit dashboard, curated prompt library, signed *builds
 ## Honest limits (Fable's blind spots, kept visible)
 - Local-first enforcement is bypassable by a determined employee with a debugger. Honest
   layered answer: signed builds + hash-chained logs make tampering *evident*; the remote
-  gateway (later) makes it *pointless* (no gateway token → no access; the credential never
-  touched the laptop).
+  gateway (later) *confines and audits the blast radius* — the credential never touched the
+  laptop, so a compromised endpoint means abuse limited to one user's scope, not stolen org
+  secrets (a patched binary still holds a session, so this bounds bypass, it doesn't eliminate
+  it).
 - Pi API churn: pin the version, wrap every Pi type behind our own interfaces in `core`,
   keep live-session integration tests as the canary.
 - MCP remote auth (OAuth 2.1 + dynamic client registration) is a multi-day swamp — the

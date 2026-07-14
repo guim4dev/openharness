@@ -83,8 +83,10 @@ Said up front rather than left for someone else to discover:
   tampering **evident** (a flipped byte fails verification), and the
   hash-chained + server-anchored audit trail makes a bypass **detectable**
   after the fact. The planned remote MCP gateway (credentials never touching
-  the laptop) is what eventually makes bypass **pointless** rather than merely
-  visible — that's not built yet.
+  the laptop) doesn't make bypass **pointless** — a patched binary still holds a
+  valid session — but it **confines the blast radius**: a compromised endpoint
+  means abuse limited to one user's policy scope, fully audited and revocable in
+  one place, not stolen org credentials used invisibly. That's not built yet.
 - **OS code-signing isn't wired up yet, so the sidecar's own code integrity
   isn't sealed.** `@openharness/bundle` verifies the *definition* (prompts,
   skills, policy, MCP config) cryptographically before it's trusted. It does
