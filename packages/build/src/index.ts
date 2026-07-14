@@ -91,6 +91,7 @@ function templateTauriConf(
     "../resources/server.mjs": "server.mjs",
     "../resources/harness.ohbundle": "harness.ohbundle",
     "../resources/org.pub": "org.pub",
+    "../resources/min-version.txt": "min-version.txt",
   };
   conf.bundle = bundle;
 
@@ -106,6 +107,7 @@ function templateTauriConf(
  * Layout produced:
  *   <outDir>/resources/harness.ohbundle   signed definition
  *   <outDir>/resources/org.pub            org PUBLIC key (verify-on-boot)
+ *   <outDir>/resources/min-version.txt    anti-rollback FLOOR (this build's def version)
  *   <outDir>/resources/server.mjs         single-file bundled sidecar
  *   <outDir>/src-tauri/                    copied + templated Tauri crate
  *   <outDir>/dist-ui/                      pre-built frontend
@@ -137,6 +139,12 @@ export async function buildHarnessApp(
   const bundle = bundleDefinition(defDir, privateKeyPem);
   writeBundle(bundle, join(resourcesDir, "harness.ohbundle"));
   writeFileSync(join(resourcesDir, "org.pub"), publicKeyPem);
+  // Bake this build's definition version as the anti-rollback FLOOR. main.rs
+  // reads it in release and passes it to the sidecar as OH_MIN_VERSION, so a
+  // later swap of an older (but still org-signed) bundle into the resource dir
+  // is refused on boot. Trailing newline keeps it a well-formed text file; the
+  // sidecar trims before use.
+  writeFileSync(join(resourcesDir, "min-version.txt"), `${bundle.manifest.version}\n`);
 
   // (c) single-file bundle the sidecar. Full bundle, no externals; the banner
   //     is what makes the ESM output actually run (see CJS_INTEROP_BANNER).
@@ -190,6 +198,6 @@ export async function buildHarnessApp(
     identifier,
     productName,
     bundle: { name: bundle.manifest.name, version: bundle.manifest.version },
-    resources: ["harness.ohbundle", "org.pub", "server.mjs"],
+    resources: ["harness.ohbundle", "org.pub", "min-version.txt", "server.mjs"],
   };
 }

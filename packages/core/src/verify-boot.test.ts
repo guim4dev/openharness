@@ -129,6 +129,63 @@ test("REFUSES a TAMPERED bundle — createLiveSession throws BundleVerificationE
   ).rejects.toThrow(BundleVerificationError);
 });
 
+test("ANTI-ROLLBACK: REFUSES a validly-signed bundle OLDER than the minVersion floor", async () => {
+  // harnesses/example is version 0.1.0; a floor of 0.2.0 makes it stale even
+  // though its signature + hashes are perfectly valid.
+  const { bundlePath, pubkeyPath } = signExample();
+  const { manager, registry } = await buildCredentials();
+
+  await expect(
+    createLiveSession({
+      verified: { bundlePath, pubkeyPath, minVersion: "0.2.0" },
+      manager,
+      registry,
+      profile: "work",
+      cwd: tmp,
+      agentDir: join(tmp, "agent"),
+      noExtensions: true,
+      modelRegistryOverride: createStubModelRegistry({
+        provider: "anthropic",
+        modelId: "claude-sonnet-5",
+        reply: REPLY,
+      }),
+    }),
+  ).rejects.toThrow(BundleVerificationError);
+});
+
+test("ANTI-ROLLBACK: ACCEPTS a validly-signed bundle AT/ABOVE the minVersion floor and streams", async () => {
+  // Floor equal to the bundle's own version (0.1.0) must pass — the floor is a
+  // lower bound, not an exact match.
+  const { bundlePath, pubkeyPath } = signExample();
+  const { manager, registry } = await buildCredentials();
+
+  const live = await createLiveSession({
+    verified: { bundlePath, pubkeyPath, minVersion: "0.1.0" },
+    manager,
+    registry,
+    profile: "work",
+    cwd: tmp,
+    agentDir: join(tmp, "agent"),
+    noExtensions: true,
+    modelRegistryOverride: createStubModelRegistry({
+      provider: "anthropic",
+      modelId: "claude-sonnet-5",
+      reply: REPLY,
+    }),
+  });
+
+  try {
+    const events: LiveSessionEvent[] = [];
+    await live.prompt("hello", (e) => events.push(e));
+    expect(events.some((e) => e.type === "error")).toBe(false);
+    expect(events.at(-1)?.type).toBe("done");
+    const done = events.at(-1) as Extract<LiveSessionEvent, { type: "done" }>;
+    expect(done.text).toContain(REPLY);
+  } finally {
+    await live.close();
+  }
+});
+
 test("REFUSES a bundle signed by the WRONG key — throws BundleVerificationError", async () => {
   const signer = generateKeypair();
   const attacker = generateKeypair();

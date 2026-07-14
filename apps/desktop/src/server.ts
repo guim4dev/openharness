@@ -18,6 +18,10 @@ import type { StartSidecarOptions } from "./sidecar.ts";
  *   The sidecar boots pinned to the verified definition; if the bundle is
  *   unsigned/tampered/signed by the wrong key, it comes up in refusal mode and
  *   the UI is locked (see sidecar `integrity_error`).
+ *   Optional anti-rollback floor:
+ *     OH_MIN_VERSION      semver floor baked into the app at build time; a
+ *                         validly-signed but OLDER bundle is refused on boot.
+ *                         Absent => no floor (dev/no-floor still works).
  *
  *   Dev boot (unverified local dir) — used when the pair above is absent:
  *     OH_HARNESS_PATH     path to a harness definition dir (else argv[2])
@@ -38,7 +42,14 @@ import type { StartSidecarOptions } from "./sidecar.ts";
 async function main(): Promise<void> {
   const bundlePath = process.env.OH_BUNDLE_PATH;
   const pubkeyPath = process.env.OH_ORG_PUBKEY_PATH;
-  const verified = bundlePath && pubkeyPath ? { bundlePath, pubkeyPath } : undefined;
+  // Anti-rollback floor baked into the app at build time (main.rs sets it from
+  // the sealed min-version.txt resource in release). When present, a validly-
+  // signed but OLDER bundle is refused on boot. Optional: absent => no floor.
+  const minVersion = process.env.OH_MIN_VERSION?.trim() || undefined;
+  const verified =
+    bundlePath && pubkeyPath
+      ? { bundlePath, pubkeyPath, ...(minVersion ? { minVersion } : {}) }
+      : undefined;
   const harnessPath = process.env.OH_HARNESS_PATH ?? process.argv[2];
 
   // A half-configured verified boot must FAIL LOUD — never silently fall back to

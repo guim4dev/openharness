@@ -110,6 +110,7 @@ test("(a) templated tauri.conf.json: identifier + productName derive from the de
   expect(dests).toContain("harness.ohbundle");
   expect(dests).toContain("org.pub");
   expect(dests).toContain("server.mjs");
+  expect(dests).toContain("min-version.txt");
   // src keys are relative to src-tauri and resolve into ../resources/
   for (const src of Object.keys(conf.bundle.resources as Record<string, string>)) {
     expect(existsSync(resolve(outDir, "src-tauri", src))).toBe(true);
@@ -126,6 +127,12 @@ test("(b) the baked harness.ohbundle verifyBundle-passes against the generated p
   expect(orgPub.trim()).toBe(publicKeyPem.trim());
   expect(orgPub).toContain("PUBLIC KEY");
   expect(orgPub).not.toContain("PRIVATE KEY");
+});
+
+test("(b2) ANTI-ROLLBACK: baked min-version.txt carries the definition's version as the floor", () => {
+  const floor = readFileSync(join(outDir, "resources", "min-version.txt"), "utf8").trim();
+  // harnesses/example is version 0.1.0 — the build bakes it as the rollback floor.
+  expect(floor).toBe("0.1.0");
 });
 
 test("(c) KEY-SCAN: no private-key material anywhere under outDir", () => {
