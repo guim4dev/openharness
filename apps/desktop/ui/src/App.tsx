@@ -1,5 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useChat, type ChatMessage, type Connection, type PendingAsk } from "./chat.ts";
+import {
+  useChat,
+  type ChatMessage,
+  type Connection,
+  type PendingAsk,
+  type SetupState,
+} from "./chat.ts";
+
+/** Human-friendly provider name for the onboarding copy. */
+function providerLabel(provider: string): string {
+  switch (provider) {
+    case "anthropic":
+      return "Anthropic";
+    case "openai":
+      return "OpenAI";
+    case "google":
+      return "Google (Gemini)";
+    case "opencode-go":
+      return "OpenCode Go";
+    default:
+      return provider;
+  }
+}
 
 declare global {
   interface Window {
@@ -154,9 +176,98 @@ function AskModal({
   );
 }
 
+/**
+ * First-run onboarding. Shown when no credential resolves for the harness's
+ * provider. A calm, single-purpose screen: paste a key and go. The key is sent
+ * over the loopback sidecar to be written to the machine-local encrypted store —
+ * it never leaves this computer. A rejected key re-shows this screen with a note.
+ */
+function SetupPanel({
+  setup,
+  connected,
+  onSubmit,
+}: {
+  setup: SetupState;
+  connected: boolean;
+  onSubmit: (secret: string) => void;
+}) {
+  const [key, setKey] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+  // A fresh rejection re-enables the form so the user can correct the key.
+  useEffect(() => {
+    if (setup.error) setSubmitting(false);
+  }, [setup.error]);
+
+  const label = providerLabel(setup.provider);
+  const canSubmit = connected && key.trim().length > 0 && !submitting;
+
+  function go() {
+    if (!canSubmit) return;
+    setSubmitting(true);
+    onSubmit(key.trim());
+  }
+
+  return (
+    <div className="lock" role="form" aria-labelledby="setup-title">
+      <div className="lock-card">
+        <div className="lock-badge" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="8" cy="15" r="4.2" />
+            <path d="M11 12l8-8" />
+            <path d="M17 6l2.5 2.5" />
+            <path d="M14 9l2.5 2.5" />
+          </svg>
+        </div>
+        <h1 id="setup-title">Add your {label} key to get started</h1>
+        <p className="lock-lead">
+          This assistant needs a {label} API key to run. It&rsquo;s saved only on
+          this computer, encrypted — it never leaves your machine.
+        </p>
+        <div className="setup-field">
+          <input
+            ref={inputRef}
+            type="password"
+            className="setup-input"
+            placeholder="Paste your API key"
+            aria-label={`${label} API key`}
+            autoComplete="off"
+            spellCheck={false}
+            value={key}
+            disabled={!connected}
+            onChange={(event) => setKey(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                go();
+              }
+            }}
+          />
+          <button className="setup-btn" type="button" onClick={go} disabled={!canSubmit}>
+            {submitting ? "Checking…" : "Save & start"}
+          </button>
+        </div>
+        {setup.error ? (
+          <p className="setup-error" role="alert">
+            {setup.error}
+          </p>
+        ) : null}
+        <p className="lock-detail">
+          Prefer a config file? Put an <code>accounts.json</code> in{" "}
+          <code>{setup.configPath}</code>.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function App() {
   const connection = useMemo(readConnection, []);
-  const { messages, status, connected, send, integrityMessage, pendingAsk, answerAsk } =
+  const { messages, status, connected, send, integrityMessage, pendingAsk, answerAsk, setup, submitCredential } =
     useChat(connection);
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
@@ -169,6 +280,11 @@ export function App() {
   // Verify-on-boot refusal takes over the whole window: no chat surface at all.
   if (status === "integrity_error") {
     return <IntegrityLock {...(integrityMessage !== undefined ? { detail: integrityMessage } : {})} />;
+  }
+
+  // First-run onboarding: no credential yet — show the key panel, not the chat.
+  if (status === "needs_setup" && setup) {
+    return <SetupPanel setup={setup} connected={connected} onSubmit={submitCredential} />;
   }
 
   const streaming = status === "streaming";

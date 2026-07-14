@@ -112,6 +112,84 @@ interface Frame {
   id?: string;
   toolName?: string;
   reason?: string;
+  provider?: string;
+  configPath?: string;
+  error?: string;
+}
+
+/**
+ * Onboarding driver: connect (expecting a `needs_setup` on connect), submit
+ * `secret`, then on `ready` send a prompt. Collect until done/error. If `secret`
+ * is rejected, no `ready` arrives — resolve after a window so the caller can
+ * assert the sidecar stayed in setup.
+ */
+function driveOnboarding(url: string, secret: string): Promise<Frame[]> {
+  return new Promise((resolve, reject) => {
+    const frames: Frame[] = [];
+    const socket = new WebSocket(url);
+    let sentCred = false;
+    let sentPrompt = false;
+    let settle: ReturnType<typeof setTimeout> | undefined;
+    const timer = setTimeout(() => {
+      socket.close();
+      reject(new Error("timed out"));
+    }, 10_000);
+    socket.onmessage = (event) => {
+      const frame = JSON.parse(readData(event.data)) as Frame;
+      frames.push(frame);
+      if (frame.type === "needs_setup" && !sentCred) {
+        sentCred = true;
+        socket.send(JSON.stringify({ type: "set_credential", secret }));
+        // If the key is rejected we'll get another needs_setup (no ready); give
+        // the sidecar a beat, then resolve so the test can assert fail-closed.
+        settle = setTimeout(() => {
+          clearTimeout(timer);
+          socket.close();
+          resolve(frames);
+        }, 600);
+      } else if (frame.type === "ready" && !sentPrompt) {
+        sentPrompt = true;
+        if (settle) clearTimeout(settle);
+        socket.send(JSON.stringify({ type: "prompt", text: "hello" }));
+      } else if (frame.type === "done" || frame.type === "error") {
+        clearTimeout(timer);
+        if (settle) clearTimeout(settle);
+        socket.close();
+        resolve(frames);
+      }
+    };
+    socket.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error("websocket error"));
+    };
+  });
+}
+
+/** Start a sidecar whose profile has NO account yet (drives the onboarding path). */
+async function startEmptyCredentialSidecar(): Promise<{
+  sidecar: SidecarHandle;
+  store: InMemorySecretStore;
+  manager: CredentialManager;
+}> {
+  const store = new InMemorySecretStore();
+  const manager = new CredentialManager({
+    accounts: [],
+    profiles: [{ name: "work", policy: "failover", accountIds: [] }],
+  });
+  const registry = new AuthProviderRegistry();
+  registry.register(apiKeyAuthProvider(store));
+  const sidecar = await startSidecar({
+    harnessPath: exampleHarness,
+    manager,
+    registry,
+    profile: "work",
+    secretStore: store,
+    cwd: tmp,
+    agentDir: join(tmp, "agent"),
+    noExtensions: true,
+    modelRegistryOverride: stubRegistry(),
+  });
+  return { sidecar, store, manager };
 }
 
 interface ToolRecord {
@@ -559,6 +637,52 @@ test("policy ask fails closed when NO client is connected at ask time: the tool 
     // Give the now-orphaned turn time to run to completion server-side.
     await new Promise((r) => setTimeout(r, 500));
     expect(record.calls).toBe(0); // no one to approve -> denied -> the tool never ran
+  } finally {
+    await sidecar.close();
+  }
+});
+
+test("onboarding: announces needs_setup with no credential, then set_credential enables chat", async () => {
+  const { sidecar, store, manager } = await startEmptyCredentialSidecar();
+  try {
+    const url = `ws://127.0.0.1:${sidecar.port}?token=${encodeURIComponent(sidecar.token)}`;
+    const frames = await driveOnboarding(url, "sk-user-pasted-key");
+
+    // On connect, with no credential, the sidecar announces onboarding.
+    const needs = frames.find((f) => f.type === "needs_setup");
+    expect(needs).toBeDefined();
+    expect(needs?.provider).toBe("anthropic");
+    expect(typeof needs?.configPath).toBe("string");
+
+    // set_credential → ready → the prompt then streams the stubbed reply.
+    expect(frames.some((f) => f.type === "ready")).toBe(true);
+    expect(
+      frames.filter((f) => f.type === "token").map((f) => f.text ?? "").join(""),
+    ).toContain(REPLY);
+    expect(frames.at(-1)?.type).toBe("done");
+
+    // The key was persisted locally and an account now resolves for the provider.
+    expect(await store.get("api-key:gui-anthropic")).toBe("sk-user-pasted-key");
+    expect(manager.activeAccount("work", "anthropic")?.id).toBe("gui-anthropic");
+  } finally {
+    await sidecar.close();
+  }
+});
+
+test("onboarding: an empty key stays in needs_setup (fail-closed, no account added)", async () => {
+  const { sidecar, store, manager } = await startEmptyCredentialSidecar();
+  try {
+    const url = `ws://127.0.0.1:${sidecar.port}?token=${encodeURIComponent(sidecar.token)}`;
+    const frames = await driveOnboarding(url, "   ");
+
+    // No ready; a second needs_setup carries the rejection reason.
+    expect(frames.some((f) => f.type === "ready")).toBe(false);
+    const withError = frames.filter((f) => f.type === "needs_setup").find((f) => f.error);
+    expect(withError?.error).toContain("empty");
+
+    // Nothing was persisted and no account was added.
+    expect(await store.get("api-key:gui-anthropic")).toBeUndefined();
+    expect(manager.activeAccount("work", "anthropic")).toBeUndefined();
   } finally {
     await sidecar.close();
   }

@@ -91,6 +91,46 @@ describe("chatReducer", () => {
     expect(state.integrityMessage).toBe("bundle tampered");
   });
 
+  test("needs_setup moves to the setup state with provider + config path", () => {
+    const state = feed(initialChatState, {
+      type: "needs_setup",
+      provider: "anthropic",
+      profile: "work",
+      configPath: "/home/u/.config/openharness",
+    });
+    expect(state.status).toBe("needs_setup");
+    expect(state.setup).toEqual({
+      provider: "anthropic",
+      profile: "work",
+      configPath: "/home/u/.config/openharness",
+    });
+    expect(state.messages).toHaveLength(0);
+  });
+
+  test("needs_setup carries a wrong-key error on a retry", () => {
+    const state = feed(initialChatState, {
+      type: "needs_setup",
+      provider: "anthropic",
+      profile: "work",
+      configPath: "/cfg",
+      error: "that key was rejected",
+    });
+    expect(state.setup?.error).toBe("that key was rejected");
+  });
+
+  test("ready clears the setup state and returns to idle", () => {
+    let state = feed(initialChatState, {
+      type: "needs_setup",
+      provider: "anthropic",
+      profile: "work",
+      configPath: "/cfg",
+    });
+    expect(state.status).toBe("needs_setup");
+    state = feed(state, { type: "ready" });
+    expect(state.status).toBe("idle");
+    expect(state.setup).toBeUndefined();
+  });
+
   test("an ask event records the pending approval", () => {
     const state = feed(initialChatState, {
       type: "ask",

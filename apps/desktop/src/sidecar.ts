@@ -3,7 +3,7 @@ import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer } from "ws";
 import type { WebSocket } from "ws";
-import { createLiveSession } from "@openharness/core";
+import { configDir, createLiveSession } from "@openharness/core";
 import type { CreateLiveSessionOptions, LiveSession } from "@openharness/core";
 import { BundleVerificationError } from "@openharness/bundle";
 
@@ -15,7 +15,13 @@ export type ClientMessage =
    * `id` correlates back to the outstanding `ask`; `approved` is the human's
    * decision. An answer with no matching pending ask is rejected.
    */
-  | { type: "ask_response"; id: string; approved: boolean };
+  | { type: "ask_response"; id: string; approved: boolean }
+  /**
+   * A credential the user provided during onboarding. Written to the
+   * machine-local encrypted store and registered on the manager for the
+   * harness's provider; the sidecar then replies `ready` or `needs_setup`.
+   */
+  | { type: "set_credential"; secret: string };
 
 /** Frames the sidecar streams back to the client. */
 export type ServerMessage =
@@ -41,7 +47,15 @@ export type ServerMessage =
    * frame is the whole conversation. Distinct from `error`, which is a failure
    * WITHIN an otherwise-trusted session.
    */
-  | { type: "integrity_error"; message: string };
+  | { type: "integrity_error"; message: string }
+  /**
+   * No credential resolves for the harness's provider. RECOVERABLE: the client
+   * shows an onboarding panel and replies with `set_credential`. `error` is set
+   * when a just-submitted key was empty/unresolvable.
+   */
+  | { type: "needs_setup"; provider: string; profile: string; configPath: string; error?: string }
+  /** A credential is now in place (after `set_credential`): chat is enabled. */
+  | { type: "ready" };
 
 export interface SidecarHandle {
   /** Ephemeral loopback port the WS server is listening on. */
@@ -77,6 +91,15 @@ function isAskResponse(value: unknown): value is Extract<ClientMessage, { type: 
     (value as { type?: unknown }).type === "ask_response" &&
     typeof (value as { id?: unknown }).id === "string" &&
     typeof (value as { approved?: unknown }).approved === "boolean"
+  );
+}
+
+function isSetCredential(value: unknown): value is Extract<ClientMessage, { type: "set_credential" }> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { type?: unknown }).type === "set_credential" &&
+    typeof (value as { secret?: unknown }).secret === "string"
   );
 }
 
@@ -222,12 +245,57 @@ export async function startSidecar(opts: StartSidecarOptions): Promise<SidecarHa
     // Normal mode: verification passed (or was not requested), so a session
     // exists. `integrityError === undefined` guarantees `live` is set.
     const session = live as LiveSession;
+
+    // Onboarding: a turn needs a credential for the harness's provider. If none
+    // resolves, announce `needs_setup` so the UI shows the panel; a
+    // `set_credential` writes the key to the machine-local store and registers
+    // it, then chat is enabled. providerId comes from the (verified) definition.
+    const { manager, secretStore, profile } = sessionOpts;
+    const providerId = session.providerId;
+    const isReady = (): boolean => !!manager.activeAccount(profile, providerId);
+    const needsSetup = (error?: string): ServerMessage => ({
+      type: "needs_setup",
+      provider: providerId,
+      profile,
+      configPath: configDir(),
+      ...(error ? { error } : {}),
+    });
+    if (!isReady()) send(socket, needsSetup());
+
     socket.on("message", (raw: Buffer | ArrayBuffer | Buffer[]) => {
       let parsed: unknown;
       try {
         parsed = JSON.parse(raw.toString());
       } catch {
         send(socket, { type: "error", message: "invalid JSON" });
+        return;
+      }
+      // A credential provided in the app during onboarding. Persist it to the
+      // local encrypted store and register an account for the harness's provider,
+      // then confirm readiness. The secret is never logged. A blank key or a
+      // missing store fails closed (stays in setup).
+      if (isSetCredential(parsed)) {
+        const secret = parsed.secret.trim();
+        if (!secret) return send(socket, needsSetup("that key was empty"));
+        if (!secretStore) return send(socket, needsSetup("no local store is configured"));
+        const id = `gui-${providerId}`;
+        void secretStore
+          .set(`api-key:${id}`, secret)
+          .then(() => {
+            manager.addAccount(
+              {
+                id,
+                provider: providerId,
+                authProviderId: "api-key",
+                label: `${providerId} (in-app)`,
+                credential: { kind: "api_key", secretRef: `api-key:${id}` },
+                health: { state: "ok" },
+              },
+              profile,
+            );
+            send(socket, isReady() ? { type: "ready" } : needsSetup("could not resolve the key"));
+          })
+          .catch(() => send(socket, needsSetup("failed to save the key")));
         return;
       }
       // A human's answer to an outstanding `ask`. Correlate by id; an answer
@@ -242,6 +310,12 @@ export async function startSidecar(opts: StartSidecarOptions): Promise<SidecarHa
       }
       if (!isPromptMessage(parsed)) {
         send(socket, { type: "error", message: "unsupported message" });
+        return;
+      }
+      // Don't drive a turn with no credential — re-announce onboarding instead
+      // of letting the provider request fail with a cryptic auth error.
+      if (!isReady()) {
+        send(socket, needsSetup());
         return;
       }
       const { text } = parsed;

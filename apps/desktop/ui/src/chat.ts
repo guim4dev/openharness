@@ -24,7 +24,18 @@ export type ServerMessage =
    * Verify-on-boot refusal from the sidecar: the configuration could not be
    * cryptographically verified. Locks the UI — no chat is possible this session.
    */
-  | { type: "integrity_error"; message: string };
+  | { type: "integrity_error"; message: string }
+  /**
+   * No credential resolves for the harness's provider yet. A RECOVERABLE state:
+   * the UI shows an onboarding panel and the user provides a key (via
+   * `submitCredential`). `error` is set when a just-submitted key was rejected.
+   */
+  | { type: "needs_setup"; provider: string; profile: string; configPath: string; error?: string }
+  /**
+   * A credential is now in place (after `set_credential`): leave the onboarding
+   * panel and enable chat. Sent by the sidecar once an account resolves.
+   */
+  | { type: "ready" };
 
 export type ChatRole = "user" | "assistant";
 
@@ -38,13 +49,22 @@ export interface ChatMessage {
   error: boolean;
 }
 
-export type ChatStatus = "idle" | "streaming" | "integrity_error";
+export type ChatStatus = "idle" | "streaming" | "integrity_error" | "needs_setup";
 
 /** An outstanding policy approval the user must answer before the tool runs. */
 export interface PendingAsk {
   id: string;
   toolName: string;
   reason?: string;
+}
+
+/** Onboarding context shown when no credential resolves for the provider. */
+export interface SetupState {
+  provider: string;
+  profile: string;
+  configPath: string;
+  /** Set when a just-submitted key was rejected, so the panel can explain. */
+  error?: string;
 }
 
 export interface ChatState {
@@ -65,6 +85,11 @@ export interface ChatState {
    * out-of-band), or defensively on `done`.
    */
   pendingAsks: PendingAsk[];
+  /**
+   * Set only in the `needs_setup` status: the onboarding context (which provider
+   * needs a key, where config lives, and any wrong-key error). Cleared on `ready`.
+   */
+  setup?: SetupState;
 }
 
 export type ChatAction =
@@ -198,6 +223,25 @@ function applyServerEvent(state: ChatState, event: ServerMessage): ChatState {
       // no further chat is possible for this session.
       return { ...state, status: "integrity_error", integrityMessage: event.message };
     }
+
+    case "needs_setup": {
+      // Recoverable: no credential resolves yet. Show the onboarding panel.
+      return {
+        ...state,
+        status: "needs_setup",
+        setup: {
+          provider: event.provider,
+          profile: event.profile,
+          configPath: event.configPath,
+          ...(event.error !== undefined ? { error: event.error } : {}),
+        },
+      };
+    }
+
+    case "ready": {
+      // A credential is now in place: leave onboarding, enable chat.
+      return { ...state, status: "idle", setup: undefined };
+    }
   }
 }
 
@@ -253,6 +297,14 @@ export interface UseChat {
    * the next queued ask. No-ops if `id` is not the currently-surfaced ask.
    */
   answerAsk: (id: string, approved: boolean) => void;
+  /** Set only in the `needs_setup` status: the onboarding context for the panel. */
+  setup?: SetupState;
+  /**
+   * Submit a credential during onboarding: forwards `set_credential` to the
+   * sidecar, which writes it to the local encrypted store and re-resolves. The
+   * sidecar replies with `ready` (chat enabled) or `needs_setup` with an error.
+   */
+  submitCredential: (secret: string) => void;
 }
 
 /**
@@ -301,6 +353,14 @@ export function useChat(connection: Connection | null): UseChat {
     socket.send(JSON.stringify({ type: "prompt", text }));
   }, []);
 
+  const submitCredential = useCallback((secret: string) => {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    // The key travels only over the loopback, token-gated socket to the local
+    // sidecar, which writes it to the machine-local encrypted store. Never logged.
+    socket.send(JSON.stringify({ type: "set_credential", secret }));
+  }, []);
+
   const answerAsk = useCallback((id: string, approved: boolean) => {
     // No-op if `id` is not the currently-surfaced ask (stale, already settled,
     // or cancelled by the server): never dequeue or answer the wrong ask.
@@ -321,7 +381,9 @@ export function useChat(connection: Connection | null): UseChat {
     connected,
     send,
     answerAsk,
+    submitCredential,
     ...(state.integrityMessage !== undefined ? { integrityMessage: state.integrityMessage } : {}),
     ...(head !== undefined ? { pendingAsk: head } : {}),
+    ...(state.setup !== undefined ? { setup: state.setup } : {}),
   };
 }
