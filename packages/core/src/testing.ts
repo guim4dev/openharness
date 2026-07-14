@@ -46,6 +46,89 @@ export function stubStreamSimple(
   };
 }
 
+/**
+ * A `streamSimple` that FAILS on its first call (emits an `error` event carrying
+ * `failErrorMessage`) and streams `reply` on every call after. Drives the live
+ * session's credential-rotation path in tests: attempt 1 errors (e.g. a rate
+ * limit) so the account is marked and rotation kicks in; attempt 2 succeeds.
+ * The failure is emitted as a stream `error` event (not a throw), matching how a
+ * real provider surfaces a mid-stream failure to `session.subscribe`.
+ */
+export function stubStreamSimpleFailingThenReply(
+  failErrorMessage: string,
+  reply: string,
+): (model: Model<Api>, ctx: Context, options?: SimpleStreamOptions) => AssistantMessageEventStream {
+  let calls = 0;
+  return (_model, _ctx, _options) => {
+    calls += 1;
+    const stream = createAssistantMessageEventStream();
+    if (calls === 1) {
+      const errMessage = fauxAssistantMessage("", { stopReason: "error" });
+      (errMessage as { errorMessage?: string }).errorMessage = failErrorMessage;
+      void (async () => {
+        stream.push({ type: "start", partial: errMessage });
+        stream.push({ type: "error", reason: "error", error: errMessage });
+        stream.end(errMessage);
+      })();
+      return stream;
+    }
+    const finalMessage = fauxAssistantMessage(reply, { stopReason: "stop" });
+    const chunks = reply.match(/\S+\s*/g) ?? [reply];
+    void (async () => {
+      stream.push({ type: "start", partial: finalMessage });
+      stream.push({ type: "text_start", contentIndex: 0, partial: finalMessage });
+      for (const delta of chunks) {
+        stream.push({ type: "text_delta", contentIndex: 0, delta, partial: finalMessage });
+      }
+      stream.push({ type: "text_end", contentIndex: 0, content: reply, partial: finalMessage });
+      stream.push({ type: "done", reason: "stop", message: finalMessage });
+      stream.end(finalMessage);
+    })();
+    return stream;
+  };
+}
+
+export interface FailThenReplyStubOptions {
+  provider: string;
+  modelId: string;
+  /** Error message the first turn fails with (matched by `classify`, e.g. a rate limit). */
+  failErrorMessage: string;
+  /** Reply streamed on the second turn (after rotation). */
+  reply: string;
+}
+
+/**
+ * ModelRegistry factory whose provider fails once then replies — see
+ * `stubStreamSimpleFailingThenReply`. Suitable as `createLiveSession`'s
+ * `modelRegistryOverride` to exercise credential rotation on a live turn.
+ */
+export function createFailThenReplyStubModelRegistry(
+  opts: FailThenReplyStubOptions,
+): (authStorage: AuthStorage) => ModelRegistry {
+  return (authStorage) => {
+    const registry = ModelRegistry.inMemory(authStorage);
+    registry.registerProvider(opts.provider, {
+      baseUrl: "http://stub.local",
+      apiKey: "stub-key",
+      api: "anthropic-messages",
+      streamSimple: stubStreamSimpleFailingThenReply(opts.failErrorMessage, opts.reply),
+      models: [
+        {
+          id: opts.modelId,
+          name: `${opts.modelId} (fail-then-reply stub)`,
+          api: "anthropic-messages",
+          reasoning: false,
+          input: ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 200_000,
+          maxTokens: 8192,
+        },
+      ],
+    });
+    return registry;
+  };
+}
+
 export interface StubProviderOptions {
   /** Provider name to register under (must match the harness's provider). */
   provider: string;

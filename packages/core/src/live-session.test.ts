@@ -12,7 +12,7 @@ import {
 import type { Account, Profile } from "@openharness/credentials";
 import { createLiveSession } from "./live-session.ts";
 import type { LiveSessionEvent } from "./live-session.ts";
-import { createStubModelRegistry } from "./testing.ts";
+import { createFailThenReplyStubModelRegistry, createStubModelRegistry } from "./testing.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const exampleHarness = join(here, "..", "..", "..", "harnesses", "example");
@@ -82,6 +82,71 @@ test("streams token deltas and a final done from a stubbed Pi provider, offline"
     expect(events.some((e) => e.type === "error")).toBe(false);
     // token events precede the done event
     expect(events.at(-1)?.type).toBe("done");
+  } finally {
+    await live.close();
+  }
+});
+
+test("rotates to the next account on a live rate-limit and still answers", async () => {
+  const store = new InMemorySecretStore();
+  await store.set("api-key:a", "key-a");
+  await store.set("api-key:b", "key-b");
+  const accounts: Account[] = [
+    {
+      id: "a",
+      provider: "anthropic",
+      authProviderId: "api-key",
+      label: "a",
+      credential: { kind: "api_key", secretRef: "api-key:a" },
+      health: { state: "ok" },
+    },
+    {
+      id: "b",
+      provider: "anthropic",
+      authProviderId: "api-key",
+      label: "b",
+      credential: { kind: "api_key", secretRef: "api-key:b" },
+      health: { state: "ok" },
+    },
+  ];
+  const profiles: Profile[] = [{ name: "work", policy: "failover", accountIds: ["a", "b"] }];
+  const manager = new CredentialManager({ accounts, profiles });
+  const registry = new AuthProviderRegistry();
+  registry.register(apiKeyAuthProvider(store));
+
+  const live = await createLiveSession({
+    harnessPath: exampleHarness,
+    manager,
+    registry,
+    profile: "work",
+    cwd: tmp,
+    agentDir: join(tmp, "agent"),
+    noExtensions: true,
+    modelRegistryOverride: createFailThenReplyStubModelRegistry({
+      provider: "anthropic",
+      modelId: "claude-sonnet-5",
+      failErrorMessage: "rate limit exceeded (429)",
+      reply: "answer after rotation",
+    }),
+  });
+
+  try {
+    const events: LiveSessionEvent[] = [];
+    await live.prompt("hello", (e) => events.push(e));
+
+    // Recovered: the reply came through and no error surfaced to the caller.
+    const done = events.find((e) => e.type === "done") as
+      | Extract<LiveSessionEvent, { type: "done" }>
+      | undefined;
+    expect(done?.text).toContain("answer after rotation");
+    expect(events.some((e) => e.type === "error")).toBe(false);
+    // The failed attempt streamed no tokens, so the reply isn't duplicated.
+    expect(events.filter((e) => e.type === "token").map((e) => e.text).join("")).toContain(
+      "answer after rotation",
+    );
+
+    // Rotation actually happened: account a was marked rate-limited, so b is active.
+    expect(manager.activeAccount("work", "anthropic")?.id).toBe("b");
   } finally {
     await live.close();
   }

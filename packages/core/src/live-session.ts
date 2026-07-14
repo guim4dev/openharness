@@ -22,6 +22,7 @@ import { createFileAuditLog } from "@openharness/audit";
 import type { AuditSink } from "@openharness/audit";
 import { createOpenHarnessAuthStorage } from "./pi-auth-storage.ts";
 import { buildPolicyExtension } from "./policy-extension.ts";
+import { classify } from "./session.ts";
 
 /** What a live turn forwards to the caller as it streams. */
 export type LiveSessionEvent =
@@ -278,13 +279,38 @@ export async function createLiveSession(opts: CreateLiveSessionOptions): Promise
     session,
     providerId,
     async prompt(text, onEvent) {
-      // Pick up any credential rotation for this turn before the request fires.
-      await oh.syncActiveProvider(providerId);
+      // Pick up any credential rotation for this turn; keep the resolved account
+      // so a mid-turn provider failure is reported against the RIGHT one.
+      let currentAccount = await oh.syncActiveProvider(providerId);
 
       const streamed: string[] = [];
       let streamError: string | undefined;
 
       const unsubscribe = session.subscribe((event) => {
+        // Pi retries a failed provider request on its own (after `delayMs`). Use
+        // that gap to ROTATE credentials: mark the current account per the error
+        // and swap the runtime key to the next healthy account, so Pi's retry
+        // hits a different account instead of the same rate-limited one. This is
+        // the live-session counterpart of the startSession rotation loop.
+        if (event.type === "auto_retry_start") {
+          const errorMessage = (event as { errorMessage?: string }).errorMessage;
+          const kind = classify(errorMessage);
+          if (kind !== "other" && currentAccount) {
+            opts.manager.reportResult(currentAccount.id, { ok: false, kind });
+            // Fire-and-forget: the AuthStorage runtime override is what Pi reads
+            // at request time, and it waits `delayMs` before retrying, so the
+            // async re-sync lands first in practice.
+            void oh
+              .syncActiveProvider(providerId)
+              .then((a) => {
+                currentAccount = a;
+              })
+              .catch(() => {
+                /* best-effort rotation; the final-failure path still surfaces errors */
+              });
+          }
+          return;
+        }
         if (event.type !== "message_update") return;
         const inner = event.assistantMessageEvent;
         if (inner.type === "text_delta") {

@@ -20,9 +20,15 @@ export interface OpenHarnessSession {
   prompt(text: string): Promise<{ text: string; rotations: number }>;
 }
 
-type ErrorKind = "rate_limit" | "quota" | "auth" | "other";
+export type ErrorKind = "rate_limit" | "quota" | "auth" | "other";
 
-function classify(err: unknown): ErrorKind {
+/**
+ * Map a provider/stream failure to a credential-rotation outcome. `other` means
+ * "not a credential problem" (don't rotate); the three credential kinds mark the
+ * account so the manager rotates/backs off. Shared by the `startSession`
+ * ModelProvider path and the live Pi-session path so both classify identically.
+ */
+export function classify(err: unknown): ErrorKind {
   const status = (err as { status?: number })?.status;
   const msg = String((err as Error)?.message ?? err);
   if (/quota|insufficient_quota|billing/i.test(msg)) return "quota";
