@@ -224,6 +224,25 @@ test("the unpinned check spans npm-family, PyPI, and container runners", async (
   ).toBe(false);
 });
 
+test("strictSupplyChain escalates an unpinned MCP server from warning to a build-failing error", async () => {
+  const dir = writeDef(
+    baseManifest({ mcp: { servers: { s: { transport: "stdio", command: "npx", args: ["-y", "srv"] } } } }),
+  );
+  // Default: a warning, still ok.
+  const lenient = await runDoctor(dir);
+  expect(lenient.ok).toBe(true);
+  expect(lenient.problems.find((p) => p.code === "mcp-server-unpinned")?.level).toBe("warn");
+  // Strict: an error, not ok (build would refuse).
+  const strict = await runDoctor(dir, { strictSupplyChain: true });
+  expect(strict.ok).toBe(false);
+  expect(strict.problems.find((p) => p.code === "mcp-server-unpinned")?.level).toBe("error");
+  // A pinned server is fine under strict too.
+  const pinnedDir = writeDef(
+    baseManifest({ mcp: { servers: { s: { transport: "stdio", command: "npx", args: ["-y", "srv@1.2.3"] } } } }),
+  );
+  expect((await runDoctor(pinnedDir, { strictSupplyChain: true })).ok).toBe(true);
+});
+
 test("the unpinned check ignores http servers and non-npx commands", async () => {
   const dir = writeDef(
     baseManifest({

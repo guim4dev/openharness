@@ -122,7 +122,17 @@ function runnerPinStatus(command: string, args: string[]): RunnerPin | undefined
   return undefined;
 }
 
-export async function runDoctor(defDir: string): Promise<DoctorReport> {
+export interface RunDoctorOptions {
+  /**
+   * Escalate the MCP supply-chain pinning check from a warning to an error, so
+   * `runDoctor().ok` is false (and `build` refuses) when any declared MCP server
+   * is fetched unpinned. Off by default (unpinned still runs); a security-
+   * conscious org opts in for a CI gate.
+   */
+  strictSupplyChain?: boolean;
+}
+
+export async function runDoctor(defDir: string, opts: RunDoctorOptions = {}): Promise<DoctorReport> {
   const problems: DoctorProblem[] = [];
 
   let def;
@@ -184,7 +194,7 @@ export async function runDoctor(defDir: string): Promise<DoctorReport> {
     const run = runnerPinStatus(spec.command, spec.args ?? []);
     if (run && !run.pinned)
       problems.push({
-        level: "warn",
+        level: opts.strictSupplyChain ? "error" : "warn",
         code: "mcp-server-unpinned",
         message: `mcp server '${server}' runs '${run.target}' via ${run.runner} with no pinned ${run.runner === "docker" || run.runner === "podman" ? "digest" : "version"} — pin it ('${run.hint}') so a malicious or breaking upstream update can't auto-ship`,
       });

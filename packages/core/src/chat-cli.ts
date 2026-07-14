@@ -27,7 +27,9 @@ Usage:
   openharness chat <harness-dir> "<message>"  same, explicit form
   openharness init <dir> [--name N] [--display D] [--provider P] [--model M]
                                               scaffold a starter definition
-  openharness doctor <harness-dir>            preflight a definition (no build)
+  openharness doctor <harness-dir> [--strict-supply-chain]
+                                              preflight a definition (no build;
+                                              --strict-supply-chain fails on unpinned MCP servers)
   openharness keygen --out <prefix>           write <prefix>.key (0600) + <prefix>.pub
   openharness bundle <dir> --out <file> --key <privkey>            sign a bundle
   openharness bundle verify <file> --pubkey <pub> [--min-version X]  verify a bundle
@@ -161,7 +163,7 @@ async function main(): Promise<void> {
       process.stderr.write("usage: openharness doctor <defDir>\n");
       process.exit(2);
     }
-    const report = await runDoctor(defDir);
+    const report = await runDoctor(defDir, { strictSupplyChain: args.includes("--strict-supply-chain") });
     const errors = report.problems.filter((p) => p.level === "error").length;
     const warns = report.problems.length - errors;
     for (const p of report.problems) {
