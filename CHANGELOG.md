@@ -7,7 +7,7 @@ All notable changes to OpenHarness. This project adheres to
 ## [Unreleased] — 2026-07-14 (initial build)
 
 The first end-to-end build: a company can define its own harness and ship it,
-governed and signed, to a TUI and a desktop app. 352 tests, MIT, built on
+governed and signed, to a TUI and a desktop app. 369 tests, MIT, built on
 [Pi](https://pi.dev).
 
 ### Added
@@ -20,6 +20,12 @@ governed and signed, to a TUI and a desktop app. 352 tests, MIT, built on
   a top-level `--help` listing every subcommand).
 - **Two frontends from one definition** — `apps/tui` (branded Pi InteractiveMode) and
   `apps/desktop` (Tauri v2 shell + React chat + Node WS sidecar), sharing one core.
+- **Visual harness builder (v3, started)** — a `BuilderPanel` in the desktop app
+  (reachable from the chat header) authors a definition from a form: branding,
+  system prompt, provider, and policy rules render live as `harness.json` +
+  `policy.json` with field-level validation — no hand-edited JSON. Backed by a
+  pure, tested model (`builder.ts` + `useBuilder`); the authoritative gate stays
+  `openharness doctor` on the saved files.
 - **Governance data plane**
   - `@openharness/mcp` — MCP client (stdio + streamable-HTTP) bridging each MCP tool
     into a Pi tool (`mcp__server__tool`); mandatory servers fail fast; server secrets
@@ -89,7 +95,8 @@ governed and signed, to a TUI and a desktop app. 352 tests, MIT, built on
   rule, a mandatory MCP server whose every tool is denied, and any MCP server
   fetched unpinned on launch — across npm (`npx`/`bunx`/`pnpm dlx`/`yarn dlx`),
   PyPI (`uvx`/`uv`), and containers (`docker`/`podman run`, pinned only by an
-  `@sha256:` digest since a tag is mutable) — the Postmark-MCP supply-chain risk).
+  `@sha256:` digest since a tag is mutable) — the Postmark-MCP supply-chain risk),
+  and MCP egress left ungoverned (a policy that leaves `mcp__*` on default-allow).
   Warnings pass; error-level problems exit non-zero, and `--strict-supply-chain`
   escalates unpinned servers to errors for a CI gate. `openharness build` runs
   doctor as a preflight and refuses to build on any error, so a broken definition
