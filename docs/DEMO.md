@@ -25,19 +25,26 @@ $TSX keygen --out "$OUT/org"
 The **private key never leaves the org**. Only the public key is baked into the
 apps it ships.
 
-## 2. Build two branded apps from the same substrate
+## 2. Build two branded apps from two DIFFERENT definitions
+
+This is the point of the substrate: two real orgs, two different businesses,
+built from the same `openharness build` — distinct branding, prompts, MCP
+tools, and policy each. `harnesses/acme-fintech` (platform engineering at an
+80-person fintech) and `harnesses/northwind-ops` (a back-office/ops copilot)
+are checked into this repo as realistic definitions, not stand-ins for the
+same one:
 
 ```bash
-$TSX build harnesses/example --key "$OUT/org.key" --out "$OUT/acme"   --org acme   --name assistant
-$TSX build harnesses/example --key "$OUT/org.key" --out "$OUT/globex" --org globex --name helper
+$TSX build harnesses/acme-fintech  --key "$OUT/org.key" --out "$OUT/acme"     --org acme     --name engineer
+$TSX build harnesses/northwind-ops --key "$OUT/org.key" --out "$OUT/northwind" --org northwind --name ops
 ```
 
 Each is a complete, ready-to-package Tauri project. They get **distinct
 identifiers**, so their credentials / audit / state never collide:
 
 ```
-acme id  : ai.openharness.acme.assistant
-globex id : ai.openharness.globex.helper
+acme id     : ai.openharness.acme.engineer      (branding.displayName: "Acme Engineer")
+northwind id: ai.openharness.northwind.ops       (branding.displayName: "Northwind Ops Copilot")
 ```
 
 Each bakes exactly three resources — `harness.ohbundle` (the signed definition),
@@ -45,17 +52,23 @@ Each bakes exactly three resources — `harness.ohbundle` (the signed definition
 and **never** the private key:
 
 ```bash
-grep -rl "PRIVATE KEY" "$OUT/acme" "$OUT/globex"   # → (no output: no key is ever baked)
+grep -rl "PRIVATE KEY" "$OUT/acme" "$OUT/northwind"   # → (no output: no key is ever baked)
 ```
 
-(Real brands ship their *own* definition dir with their own prompt/skills/policy/
-branding; here both reuse `harnesses/example`, so both show its display name.)
+The two also show the format's range: `acme-fintech/policy.json` is
+deny-by-default (only allow-listed reads + `git` + its two read-only MCP
+servers get through; anything destructive is denied outright), while
+`northwind-ops/policy.json` is ask-by-default (reads are allow-listed, but
+its back-office server's mutating tools always prompt a human first). Both
+harnesses' MCP servers are declared `"mandatory": false` and reference real
+npx-installable MCP servers illustratively (`@modelcontextprotocol/server-*`)
+— nothing needs to be running for either build above to succeed.
 
 ## 3. The app boots pinned to the signed definition
 
 ```bash
 $TSX bundle verify "$OUT/acme/resources/harness.ohbundle" --pubkey "$OUT/org.pub"
-# → bundle OK: example@0.1.0
+# → bundle OK: acme-fintech@0.1.0
 ```
 
 At runtime the desktop sidecar loads via `loadVerifiedDefinition` (M1): a valid

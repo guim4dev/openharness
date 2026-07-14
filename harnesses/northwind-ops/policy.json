@@ -1,0 +1,16 @@
+{
+  "default": "ask",
+  "rules": [
+    { "match": "read", "action": "allow" },
+    { "match": "mcp__back_office__read_query", "action": "allow", "reason": "Read-only queries don't need confirmation." },
+    { "match": "mcp__back_office__list_tables", "action": "allow" },
+    { "match": "mcp__back_office__describe_table", "action": "allow" },
+    { "match": "mcp__back_office__write_query", "action": "ask", "reason": "Mutating the operations DB is a real customer-facing change — confirm first." },
+    { "match": "mcp__back_office__append_insight", "action": "ask", "reason": "Recording an insight edits shared state — confirm first." }
+  ],
+  "models": { "allow": ["anthropic/claude-*", "openai/gpt-5*"] },
+  "redact": [
+    { "pattern": "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "replace": "[REDACTED_EMAIL]" },
+    { "pattern": "\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b", "replace": "[REDACTED_PHONE]" }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "name": "northwind-ops",
+  "version": "0.1.0",
+  "branding": { "displayName": "Northwind Ops Copilot", "accent": "#E8590C" },
+  "systemPrompt": "system-prompt.md",
+  "skills": [{ "path": "skills/order-remediation", "mandatory": true }],
+  "providers": {
+    "default": { "provider": "anthropic", "model": "claude-sonnet-5", "credentialProfile": "ops" },
+    "batch": { "provider": "openai", "model": "gpt-5-mini", "credentialProfile": "ops-batch" }
+  },
+  "mcp": {
+    "servers": {
+      "back_office": {
+        "transport": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-sqlite", "--db-path", "/srv/northwind/ops.db"],
+        "mandatory": false,
+        "tools": ["read_query", "list_tables", "describe_table", "write_query", "append_insight"]
+      }
+    }
+  }
+}
