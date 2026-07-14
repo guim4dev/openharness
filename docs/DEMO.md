@@ -81,7 +81,10 @@ CISO.
   `tool_call` / `tool_result` / `before_provider_request` seams (in-process, can't
   be prompt-jailbroken). Denied actions show a branded "Blocked by policy" result.
 - **Audit** appends a hash-chained JSONL line per external call
-  (`<app-data-dir>/…`), external calls only — never prompts. Tamper-evident.
+  (`<app-data-dir>/…`), external calls only — never prompts. The local chain
+  catches accidental corruption and naive in-place edits; strong tamper-evidence
+  comes from shipping entries to the server, which retains a per-source HEAD and
+  refuses any re-chained/forked/gapped submission (the server copy is the anchor).
 - **Credentials** are BYO-key with multi-account rotation (org API keys / OpenCode
   Go / Claude Max). Consumer ChatGPT subscriptions are personal-use only (never
   pooled across employees — D11).
@@ -106,9 +109,14 @@ of bug that hides until a real install.
 ## Honest threat model (say it before the buyer finds it)
 
 - Local-first enforcement is bypassable by a determined employee with a debugger.
-  Signed builds + hash-chained audit make tampering **evident**; the future remote
-  MCP gateway (org secrets server-side) makes it **pointless** — no gateway token,
-  no access, the credential never touched the laptop.
+  Signed builds make config tampering **evident**. The local audit chain is
+  keyless and genesis-anchored, so on its own it only catches accidental
+  corruption and naive edits — a writer can re-chain a forgery locally. Tamper-
+  **evidence** for the audit trail comes from shipping entries to the server,
+  which retains a per-source HEAD and rejects re-chained/forked/gapped
+  submissions; the server's retained copy is the anchor. The future remote MCP
+  gateway (org secrets server-side) makes bypass **pointless** — no gateway
+  token, no access, the credential never touched the laptop.
 - Until OS code-signing seals the app bundle, the *definition* integrity is
   verified but the shell still trusts whatever sidecar binary sits next to it
   (*code* integrity isn't sealed yet). That's the OS-signing follow-up.

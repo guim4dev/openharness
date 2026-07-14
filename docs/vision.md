@@ -25,7 +25,9 @@ On `main`, **139 tests green**, typecheck + `cargo check` green. Packages/apps:
 - **`@openharness/policy`** — deny-by-default first-match rules + secret redaction +
   model allow/deny; enforced in-process at `tool_call`/`tool_result`/`before_provider_request`.
 - **`@openharness/audit`** — hash-chained JSONL, external calls only (no prompts),
-  emitted from the same code path as enforcement; `verifyAuditLog` tamper-detection.
+  emitted from the same code path as enforcement; `verifyAuditLog` catches accidental
+  corruption + naive edits (keyless/genesis-anchored — the server's retained per-source
+  HEAD is the real tamper-evidence anchor, rejecting re-chained/forked/gapped pushes).
 - **`@openharness/bundle`** — ed25519-signed `.ohbundle` definition bundles;
   `verifyBundle`/`loadVerifiedDefinition` (fail-closed, path-traversal-safe).
 - **`@openharness/server`** — thin `GET /bundle` + `POST /audit`, bearer-gated, loopback.

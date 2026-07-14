@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PARAMETERIZED, PARAMETERIZED_TOOL } from "./match-form.ts";
 import type { Policy } from "./types.ts";
 
 export class PolicyError extends Error {}
@@ -41,5 +42,19 @@ export const policySchema: z.ZodType<Policy, z.ZodTypeDef, unknown> = z.object({
 export function parsePolicy(raw: unknown): Policy {
   const parsed = policySchema.safeParse(raw);
   if (!parsed.success) throw new PolicyError(`policy is invalid:\n${parsed.error.toString()}`);
+
+  // Fail LOUD on a parameterized `name(<glob>)` rule whose tool name is not
+  // `bash`. Argument-matching only exists for bash's `command`; for any other
+  // tool the matcher can never satisfy it, so such a rule is a silent no-op —
+  // e.g. a deny written as `mcp__shell__exec(*rm*)` would never fire. A security
+  // rule must never silently become a no-op, so we reject it at load time.
+  for (const rule of parsed.data.rules) {
+    const m = PARAMETERIZED.exec(rule.match);
+    if (m && m[1].trim() !== PARAMETERIZED_TOOL) {
+      throw new PolicyError(
+        `policy rule ${JSON.stringify(rule.match)}: argument-matching is only supported for ${PARAMETERIZED_TOOL}(...)`,
+      );
+    }
+  }
   return parsed.data;
 }

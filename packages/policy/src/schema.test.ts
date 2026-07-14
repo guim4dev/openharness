@@ -40,6 +40,26 @@ test("rejects an empty match", () => {
   );
 });
 
+test("rejects a parameterized match on a non-bash tool (would silently never match)", () => {
+  // A deny written as `mcp__shell__exec(*rm*)` can never fire (only bash exposes
+  // an argument to glob), so it must be rejected at load rather than becoming a
+  // silent no-op that a reader assumes is protecting them.
+  expect(() =>
+    parsePolicy({ default: "allow", rules: [{ match: "mcp__shell__exec(*rm*)", action: "deny" }] }),
+  ).toThrow(PolicyError);
+  expect(() =>
+    parsePolicy({ default: "allow", rules: [{ match: "read(secret *)", action: "deny" }] }),
+  ).toThrow(/argument-matching is only supported for bash/);
+
+  // The supported bash(...) form still loads, as does a plain (unparameterized) glob.
+  expect(() =>
+    parsePolicy({ default: "allow", rules: [{ match: "bash(rm -rf *)", action: "deny" }] }),
+  ).not.toThrow();
+  expect(() =>
+    parsePolicy({ default: "allow", rules: [{ match: "mcp__shell__exec", action: "deny" }] }),
+  ).not.toThrow();
+});
+
 test("schema is exported for external validation", () => {
   expect(policySchema.safeParse({ default: "deny" }).success).toBe(true);
 });
