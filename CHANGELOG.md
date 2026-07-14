@@ -36,8 +36,10 @@ governed and signed, to a TUI and a desktop app. 191 tests, MIT, built on
   definition** and shows an integrity-refusal screen on tamper or rollback.
 - **Policy `ask` UX** in both frontends — a branded approve/deny prompt (TUI dialog;
   desktop modal over the WS), fail-closed.
-- **Example harnesses** — `acme-fintech` (deny-by-default, AWS-key redaction) and
-  `northwind-ops` (ask-on-writes, PII redaction).
+- **Example harnesses** — `acme-fintech` (deny-by-default, AWS-key redaction),
+  `northwind-ops` (ask-on-writes, PII redaction), and `meridian-support` (the
+  non-technical desktop operator: `bash` denied, ask-on-every-write, heavy PII
+  redaction — the example that exercises the desktop approval modal).
 - **BYO-key** — API keys, gateway subscriptions (OpenCode Go), multi-account rotation.
 - **Project** — MIT `LICENSE` + `NOTICE`, `CONTRIBUTING`, a landing page (GitHub Pages),
   CI (Node 22: test + typecheck), and issue/PR templates.

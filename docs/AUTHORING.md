@@ -2,7 +2,9 @@
 
 A **HarnessDefinition** is a directory. This is everything it can contain and how
 to ship it. Working examples: [`harnesses/acme-fintech`](../harnesses/acme-fintech),
-[`harnesses/northwind-ops`](../harnesses/northwind-ops).
+[`harnesses/northwind-ops`](../harnesses/northwind-ops),
+[`harnesses/meridian-support`](../harnesses/meridian-support) (the non-technical
+desktop operator — `bash` denied, ask-on-every-write, heavy PII redaction).
 
 Starting from scratch? `openharness init my-harness` scaffolds a minimal, valid,
 offline-safe one for you (no `mcp` section, a permissive-but-documented starter

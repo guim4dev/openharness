@@ -1,0 +1,30 @@
+{
+  "name": "meridian-support",
+  "version": "0.1.0",
+  "branding": { "displayName": "Meridian Support Desk", "accent": "#2563EB" },
+  "systemPrompt": "system-prompt.md",
+  "skills": [{ "path": "skills/customer-reply", "mandatory": true }],
+  "providers": {
+    "default": { "provider": "anthropic", "model": "claude-sonnet-5", "credentialProfile": "support" }
+  },
+  "mcp": {
+    "servers": {
+      "helpdesk": {
+        "transport": "stdio",
+        "command": "npx",
+        "args": ["-y", "@meridian/mcp-helpdesk", "--endpoint", "https://helpdesk.meridian.internal"],
+        "mandatory": false,
+        "tools": [
+          "search_kb",
+          "get_customer",
+          "get_ticket",
+          "list_tickets",
+          "reply_to_customer",
+          "create_ticket",
+          "update_ticket",
+          "issue_credit"
+        ]
+      }
+    }
+  }
+}

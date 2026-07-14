@@ -6,10 +6,11 @@ import { fileURLToPath } from "node:url";
 import { generateKeypair, verifyBundle } from "@openharness/bundle";
 import { buildHarnessApp } from "./index.ts";
 
-// Mirrors build.test.ts, but exercises the two realistic example harnesses
-// (harnesses/acme-fintech, harnesses/northwind-ops) instead of harnesses/example
-// — each must brand into its own identifier/productName and produce a bundle
-// that verifies, entirely offline (no MCP server ever connects at build time).
+// Mirrors build.test.ts, but exercises the three realistic example harnesses
+// (harnesses/acme-fintech, harnesses/northwind-ops, harnesses/meridian-support)
+// instead of harnesses/example — each must brand into its own
+// identifier/productName and produce a bundle that verifies, entirely offline
+// (no MCP server ever connects at build time).
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..", "..");
@@ -30,6 +31,14 @@ const examples = [
     expectedIdentifier: "ai.openharness.northwind.ops",
     expectedProductName: "Northwind Ops Copilot",
     expectedBundleName: "northwind-ops",
+  },
+  {
+    defDir: join(repoRoot, "harnesses", "meridian-support"),
+    org: "meridian",
+    name: "support",
+    expectedIdentifier: "ai.openharness.meridian.support",
+    expectedProductName: "Meridian Support Desk",
+    expectedBundleName: "meridian-support",
   },
 ] as const;
 
@@ -88,7 +97,7 @@ for (const ex of examples) {
   }, 60000);
 }
 
-test("the two builds get distinct identifiers and product names (no cross-brand collision)", () => {
+test("the three builds get distinct identifiers and product names (no cross-brand collision)", () => {
   expect(built).toHaveLength(examples.length);
   const identifiers = new Set(built.map((b) => b.identifier));
   const productNames = new Set(built.map((b) => b.productName));

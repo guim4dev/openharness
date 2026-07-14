@@ -1,0 +1,24 @@
+{
+  "default": "ask",
+  "rules": [
+    { "match": "bash", "action": "deny", "reason": "The support desk never runs shell commands — this operator has no terminal." },
+
+    { "match": "read", "action": "allow" },
+    { "match": "mcp__helpdesk__search_kb", "action": "allow", "reason": "Reading the knowledge base is safe." },
+    { "match": "mcp__helpdesk__get_customer", "action": "allow" },
+    { "match": "mcp__helpdesk__get_ticket", "action": "allow" },
+    { "match": "mcp__helpdesk__list_tickets", "action": "allow" },
+
+    { "match": "mcp__helpdesk__reply_to_customer", "action": "ask", "reason": "This sends a message to a real customer — read the wording back and confirm before it goes out." },
+    { "match": "mcp__helpdesk__create_ticket", "action": "ask", "reason": "Opening a ticket is shared state — confirm first." },
+    { "match": "mcp__helpdesk__update_ticket", "action": "ask", "reason": "Changing a ticket is a real support action — confirm first." },
+    { "match": "mcp__helpdesk__issue_credit", "action": "ask", "reason": "Issuing account credit moves money — always confirm the amount and the customer first." }
+  ],
+  "models": { "allow": ["anthropic/claude-*"] },
+  "redact": [
+    { "pattern": "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "replace": "[REDACTED_EMAIL]" },
+    { "pattern": "\\b\\d{4}[ -]?\\d{4}[ -]?\\d{4}[ -]?\\d{4}\\b", "replace": "[REDACTED_CARD]" },
+    { "pattern": "\\b\\d{3}-\\d{2}-\\d{4}\\b", "replace": "[REDACTED_ID]" },
+    { "pattern": "\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b", "replace": "[REDACTED_PHONE]" }
+  ]
+}

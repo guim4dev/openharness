@@ -40,7 +40,7 @@ packages/
 apps/
   tui          branded terminal entry (Pi InteractiveMode)
   desktop      Tauri v2 shell + React chat + Node WS sidecar
-harnesses/     example definitions (example, acme-fintech, northwind-ops)
+harnesses/     example definitions (example, acme-fintech, northwind-ops, meridian-support)
 docs/          vision, specs, DEMO
 ```
 
