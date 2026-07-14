@@ -20,6 +20,8 @@ export type { KmsStore, UpstreamCredential } from "./broker.ts";
 export { egressAllowed, isPrivateHost, tapInjectedField } from "./egress.ts";
 export type { Connector, ConnectorResult } from "./connectors/index.ts";
 export { createGithubReadConnector } from "./connectors/github-read.ts";
+export { createNotifyConnector } from "./connectors/notify.ts";
+export type { NotifyConnectorOptions } from "./connectors/notify.ts";
 export { sanitizeResult } from "./redact-return.ts";
 export { auditGovernedCall } from "./audit-endpoint.ts";
 export type { GovernedCallRecord } from "./audit-endpoint.ts";

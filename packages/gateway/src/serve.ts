@@ -4,6 +4,7 @@ import { SecretStoreKms } from "./broker.ts";
 import { createApprovalQueue } from "./approval.ts";
 import { createConnectorSessions } from "./sessions.ts";
 import { createGithubReadConnector } from "./connectors/github-read.ts";
+import { createNotifyConnector } from "./connectors/notify.ts";
 import type { Connector } from "./connectors/index.ts";
 import { startGatewayHttp, type GatewayHttpServer } from "./http.ts";
 import type { ResolvedGatewayServerConfig } from "./config.ts";
@@ -15,6 +16,7 @@ import type { ResolvedGatewayServerConfig } from "./config.ts";
  */
 const CONNECTOR_FACTORIES: Record<string, () => Connector> = {
   "github-read": () => createGithubReadConnector(),
+  notify: () => createNotifyConnector(),
 };
 
 export interface StartGatewayFromConfigOptions {
