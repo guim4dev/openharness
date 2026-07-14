@@ -113,6 +113,7 @@ subscription, or local runtime) sits underneath.
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | How the pieces fit — the package map, the in-process governance data plane, the Pi seams. |
 | [`docs/AUTHORING.md`](docs/AUTHORING.md) | Everything a `HarnessDefinition` directory can contain, and how to ship it. |
 | [`docs/vision.md`](docs/vision.md) | The full thinking and the decision log (D1–D12) behind the shape. |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Where it's going — v1 shipped → the remote MCP gateway → end-to-end trust, grounded in the 2026 governance baseline. |
 | [`docs/specs/`](docs/specs) | Per-slice designs (walking skeleton, governance data plane). |
 | [`SECURITY.md`](SECURITY.md) | Threat model, fail-safe invariants, private reporting. |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`CHANGELOG.md`](CHANGELOG.md) | How to contribute · what has shipped. |
