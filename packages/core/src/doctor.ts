@@ -112,10 +112,12 @@ function runnerPinStatus(command: string, args: string[]): RunnerPin | undefined
   if (base === "uv" && args[0] === "x") return pypi("uv x", firstPositional(args, 1));
   if (base === "uv" && args[0] === "tool" && args[1] === "run") return pypi("uv tool run", firstPositional(args, 2));
   if ((base === "docker" || base === "podman") && args.includes("run")) {
-    // Pinned only by a content digest anywhere in the args — robust against
-    // docker's flag/value token soup, since we don't need to locate the image
-    // precisely, only whether a digest is present.
-    const pinned = args.some((a) => /@sha256:[0-9a-f]{64}/i.test(a));
+    // Pinned only when some argument IS a full image reference ending in a
+    // content digest — `<name>[:tag]@sha256:<64hex>`, anchored. A digest merely
+    // CONTAINED in an unrelated arg (e.g. `-e EXPECTED=@sha256:…`, whose token
+    // carries an `=` outside the image-name charset) does NOT count — that false
+    // negative would let a mutable `:latest` image ship silently.
+    const pinned = args.some((a) => /^[a-z0-9._/:-]+@sha256:[0-9a-f]{64}$/i.test(a));
     const image = firstPositional(args, args.indexOf("run") + 1) ?? "<image>";
     return { runner: base, target: image, pinned, hint: `${image.split("@")[0].split(":")[0]}@sha256:<digest>` };
   }

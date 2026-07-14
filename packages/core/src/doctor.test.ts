@@ -222,6 +222,13 @@ test("the unpinned check spans npm-family, PyPI, and container runners", async (
     await warns("docker", ["run", "-i", "--rm", "org/mcp@sha256:" + "a".repeat(64)]),
     "docker digest",
   ).toBe(false);
+
+  // A decoy digest in an UNRELATED arg (env value) must NOT count as pinned — the
+  // image is still the mutable `:latest`, so this must warn.
+  expect(
+    await warns("docker", ["run", "-e", "EXPECTED=@sha256:" + "a".repeat(64), "--rm", "org/mcp:latest"]),
+    "docker decoy digest in env",
+  ).toBe(true);
 });
 
 test("warns when MCP servers are declared but the policy leaves mcp__* on default-allow", async () => {
