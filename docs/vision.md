@@ -10,7 +10,7 @@ Last updated: 2026-07-14 (after an autonomous build night).
 
 ## 0. Current state (what's actually built)
 
-On `main`, **149 tests green**, typecheck + `cargo check` green. A cross-cutting
+On `main`, **245 tests green**, typecheck + `cargo check` green. A cross-cutting
 integration test proves MCP + policy + audit compose end-to-end in one live
 session, and an adversarial review pass hardened the security claims (honest
 audit-integrity framing + server-side chain verification, policy fails loud on a
@@ -28,7 +28,8 @@ malformed rule, constant-time token). Packages/apps:
 - **`@openharness/core`** — cross-platform per-identifier paths, `createLiveSession`
   (drives a real in-process Pi session, streams tokens), verified-load path
   (`loadVerifiedDefinition`), `createOpenHarnessAuthStorage`, `loadAccounts` (BYO-key),
-  the policy enforcement extension wiring, `openharness chat/keygen/bundle/build/serve` CLI.
+  the policy enforcement extension wiring, `runDoctor` (definition preflight), and the
+  `openharness chat/init/doctor/keygen/bundle/build/serve` CLI.
 - **`@openharness/mcp`** — MCP client (stdio + streamable-HTTP) bridging each MCP tool
   into a Pi tool (`mcp__server__tool`); mandatory servers fail fast. The enforcement seam.
 - **`@openharness/policy`** — deny-by-default first-match rules + secret redaction +
@@ -50,9 +51,12 @@ malformed rule, constant-time token). Packages/apps:
 
 Demo proven end-to-end (see `docs/DEMO.md`): build two branded, isolated apps → verify
 → flip one byte → integrity refusal. **Done:** walking skeleton (4 phases) + governance
-data plane (5) + moat build pipeline (M1–M3). **Deferred:** final `tauri build` +
-fresh-account validation (manual), OS code-signing, remote MCP gateway + credential
-pooling, builder UI, cloud.
+data plane (5) + moat build pipeline (M1–M3), plus `openharness init`/`doctor`
+(scaffold + preflight, doctor also gating `build` and CI), a third example harness
+(`meridian-support`, the non-technical desktop operator), and design specs for the two
+next milestones (`docs/specs/`: the v1.1 desktop onboarding and the v2 remote MCP
+gateway). **Deferred:** final `tauri build` + fresh-account validation (manual), OS
+code-signing, remote MCP gateway + credential pooling, builder UI, cloud.
 
 ---
 

@@ -119,8 +119,8 @@ subscription, or local runtime) sits underneath.
 | [`SECURITY.md`](SECURITY.md) | Threat model, fail-safe invariants, private reporting. |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`CHANGELOG.md`](CHANGELOG.md) | How to contribute · what has shipped. |
 
-The eleven `@openharness/*` packages (plus `apps/tui` and `apps/desktop`) each
-own one responsibility — the [architecture package map](docs/ARCHITECTURE.md#packages)
+The `@openharness/*` packages (plus `apps/tui` and `apps/desktop`) each own one
+responsibility — the [architecture package map](docs/ARCHITECTURE.md#packages)
 is the fastest way to find your way around the monorepo.
 
 ## Security
