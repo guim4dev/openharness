@@ -80,9 +80,15 @@ The onboarding panel offers, per the harness's provider:
 ### 3c. The security boundary (the sensitive part — state it explicitly)
 
 - The key **never leaves the machine**: it is written to the same local
-  encrypted secret store the CLI/`loadAccounts` already use, and read back the
-  same way. It never enters `harness.json`, the signed bundle, the audit log, or
-  any log line.
+  encrypted secret store the CLI/`loadAccounts` already use. It never enters
+  `harness.json`, the signed bundle, the audit log, or any log line.
+- **Durability (as built, v1.1):** the raw key persists in the encrypted store,
+  but the *account mapping* is registered in-memory (`CredentialManager.addAccount`)
+  for the session only — `loadAccounts` rebuilds accounts from env + `accounts.json`
+  on the next launch, so an in-app key does not yet survive a restart (the user
+  re-enters it). Persisting a keyless `accounts.json` entry that references the
+  already-stored secret is the durable follow-up; it is deferred here only because
+  §5 de-scopes app-driven `accounts.json` writes. Tracked as an open decision (§6).
 - The transport for `set_credential` is the **existing** sidecar channel:
   loopback (127.0.0.1) + ephemeral-token-gated WebSocket. No new listener, no new
   network surface — the same boundary that already carries prompts.
@@ -128,6 +134,12 @@ is); org-provisioned/managed credentials (that's the v2 gateway, not local BYO).
 5. **Env-var precedence.** If an env var *and* an in-app key both exist, which
    wins, and is that surfaced? (Avoid a confusing "I pasted a key but it used the
    old env one.")
+6. **Durability across restart.** As built, an in-app key persists in the
+   encrypted store but its account mapping is session-only (§3c), so the user
+   re-enters it each launch. Persist a keyless `accounts.json` entry referencing
+   the stored secret (durable, key stays encrypted) — reversing §5's de-scope of
+   app-driven `accounts.json` writes? This is the highest-value follow-up for a
+   non-technical user, who won't want to re-onboard daily.
 
 ---
 
