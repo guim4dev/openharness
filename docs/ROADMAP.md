@@ -139,9 +139,10 @@ questions a human must answer first) is in
 - **Visual harness builder** — author `harness.json` + `policy.json` without
   hand-editing JSON, so a non-engineer owner can shape and ship a harness. ✓
   Started: a `BuilderPanel` (reachable from the desktop chat header) with a pure,
-  tested model — fill branding/prompt/provider + policy rules and watch the live
-  `harness.json`/`policy.json` render with field-level validation. Remaining:
-  save-to-disk via the sidecar and a guided skills/MCP section.
+  tested model — fill branding/prompt/provider, policy rules, skills, and MCP
+  servers, and watch the live `harness.json`/`policy.json` render with
+  field-level validation. Remaining: save-to-disk via the sidecar (needs a Tauri
+  file dialog).
 - **Managed cloud** — a hosted gateway + bundle host + audit sink for orgs that
   don't want to run infra, with the self-hosted path always a first-class equal.
 
