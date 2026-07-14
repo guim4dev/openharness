@@ -5,6 +5,7 @@
   "type": "module",
   "main": "src/index.ts",
   "dependencies": {
+    "@openharness/audit": "0.0.1",
     "@openharness/bundle": "0.0.1"
   }
 }

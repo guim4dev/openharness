@@ -354,6 +354,7 @@ test("MCP bridge + policy deny + redaction + audit COMPOSE in one live session",
   expect(content).not.toContain(SECRET);
   expect(content).not.toContain(PLACEHOLDER);
 
-  // The audit chain is intact and tamper-evident end to end.
+  // The local audit chain is self-consistent end to end (accidental-corruption /
+  // naive-edit detection; strong tamper-evidence is the server's retained HEAD).
   expect(verifyAuditLog(auditPath)).toEqual({ ok: true });
 });

@@ -49,7 +49,12 @@ Bring MCP to the harness (Pi has none), already the enforcement seam.
   flag), model requests + token counts, definition version, which pooled account served.
 - **External calls only. No prompts/conversation by default** (privacy + works-council
   defense); prompt capture is an explicit org opt-in.
-- **Hash-chained** entries → tamper-evidence for free.
+- **Hash-chained** entries → cheap local self-consistency: `verifyAuditLog` catches
+  accidental corruption and naive in-place edits. It is **not** forgery-proof on its own
+  (keyless chain, public genesis — a writer can recompute the chain). Real tamper-evidence
+  is **server-side**: `POST /audit` retains a per-source HEAD and rejects any submission
+  that does not continue it (re-chain from genesis, fork, or seq gap). The server's
+  retained copy is the anchor of trust.
 
 ### DP4 — Signed definition bundles (the real "distribution/identity" MVP)
 - `openharness bundle` → tar of definition + policy + version manifest, **ed25519-signed**.

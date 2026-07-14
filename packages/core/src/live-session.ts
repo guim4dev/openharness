@@ -128,6 +128,7 @@ export interface LiveSession {
  */
 async function resolveDefinition(opts: CreateLiveSessionOptions): Promise<HarnessDefinition> {
   if (opts.verified) {
+    // TODO(rollback): enforce an anti-rollback minVersion here so a validly-signed but stale bundle can't be replayed.
     return loadVerifiedDefinition(
       opts.verified.bundlePath,
       readFileSync(opts.verified.pubkeyPath, "utf8"),

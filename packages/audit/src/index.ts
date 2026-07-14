@@ -3,8 +3,23 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeSync } f
 import { dirname } from "node:path";
 
 /**
- * @openharness/audit — a tamper-evident, hash-chained JSONL audit log for
- * external-call events (tool calls, tool results, model requests).
+ * @openharness/audit — a hash-chained JSONL audit log for external-call events
+ * (tool calls, tool results, model requests).
+ *
+ * INTEGRITY GUARANTEE — read this honestly. The chain is KEYLESS and anchored to
+ * a PUBLIC genesis (`AUDIT_GENESIS`). `verifyAuditLog` therefore detects only
+ * ACCIDENTAL corruption and NAIVE in-place edits: flip a byte, drop a line, or
+ * reorder entries and the recomputation breaks. It is NOT proof against a
+ * motivated forger — anyone who can write the log (or POST to `/audit`) can
+ * recompute the whole chain from the public genesis and produce a log that
+ * `verifyAuditLog` accepts. There is no secret key here to stop them.
+ *
+ * Strong tamper-EVIDENCE comes from the SERVER, not this local chain: entries
+ * must be shipped to `@openharness/server`, which retains a per-source HEAD and
+ * rejects any submission that does not continue the last accepted entry (a
+ * re-chain from genesis, a fork, or a seq gap is refused). The server's retained
+ * copy is the anchor of trust; the local chain is a cheap self-consistency check
+ * on top of it.
  *
  * SECURITY INVARIANT: an audit entry NEVER carries raw secrets or any
  * prompt/message/conversation content. Callers pass only already-redacted,
@@ -105,7 +120,7 @@ export function hashCanonical(value: unknown): string {
 }
 
 /** Chain hash for a record: sha256(prevHash + canonicalJSON(recordWithoutHash)). */
-function chainHash(prevHash: string, recordWithoutHash: Record<string, unknown>): string {
+export function chainHash(prevHash: string, recordWithoutHash: Record<string, unknown>): string {
   return createHash("sha256").update(prevHash + canonicalJSON(recordWithoutHash)).digest("hex");
 }
 
@@ -192,7 +207,13 @@ export interface VerifyResult {
  * Recompute the chain over the file and report the first broken entry. A missing
  * or empty file verifies vacuously. An entry is broken when it is unparseable, its
  * `seq` is out of order, its `prevHash` does not match the running hash, or its
- * stored `hash` does not match the recomputation — i.e. any mutation of any line.
+ * stored `hash` does not match the recomputation — i.e. any accidental mutation
+ * or naive in-place edit of any line.
+ *
+ * NOT a forgery check: because the chain is keyless and anchored to the public
+ * `AUDIT_GENESIS`, a writer who recomputes every hash from genesis produces a log
+ * that passes here. Trust the SERVER's retained per-source HEAD for that; see the
+ * module-level integrity note.
  */
 export function verifyAuditLog(path: string, opts: FileAuditLogOptions = {}): VerifyResult {
   const genesis = opts.genesis ?? AUDIT_GENESIS;

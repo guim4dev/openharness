@@ -1,4 +1,5 @@
 import { globMatch } from "./glob.ts";
+import { PARAMETERIZED } from "./match-form.ts";
 import { PolicyError } from "./schema.ts";
 import type { Policy, PolicyAction, ToolEvaluation } from "./types.ts";
 
@@ -18,10 +19,6 @@ function toolCommandString(toolName: string, args: unknown): string | undefined 
   }
   return undefined;
 }
-
-// A trailing `(...)` denotes the parameterized form. Tool names never contain
-// parens, so a name with no parens is a plain tool-name glob.
-const PARAMETERIZED = /^([^()]+)\((.*)\)$/s;
 
 /**
  * Match a policy `match` pattern against a tool call.
