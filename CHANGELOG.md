@@ -7,7 +7,7 @@ All notable changes to OpenHarness. This project adheres to
 ## [Unreleased] — 2026-07-14 (initial build)
 
 The first end-to-end build: a company can define its own harness and ship it,
-governed and signed, to a TUI and a desktop app. 391 tests, MIT, built on
+governed and signed, to a TUI and a desktop app. 397 tests, MIT, built on
 [Pi](https://pi.dev).
 
 ### Added
@@ -66,7 +66,9 @@ governed and signed, to a TUI and a desktop app. 391 tests, MIT, built on
   credential broker resolved only after the allow decision (the gateway holds
   its own per-upstream credential — no token passthrough), a sandboxed connector
   runtime with a per-connector egress allowlist + a forward-proxy tap (the
-  Postmark defense) + one first-party GitHub-read connector, return-path
+  Postmark defense, now ACTIVE in a first-party `notify` WRITE connector that
+  refuses an unsanctioned field — a silently-injected BCC — before egress)
+  alongside a first-party GitHub-read connector, return-path
   redaction, an authoritative hash-chained audit, a fail-closed server-side
   approval queue, and per-user upstream session isolation. The **transport**
   closes the loop: a definition declares a `gateway` (url + pinned pubkey +

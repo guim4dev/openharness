@@ -10,7 +10,7 @@ Last updated: 2026-07-14 (after an autonomous build night).
 
 ## 0. Current state (what's actually built)
 
-On `main`, **391 tests green**, typecheck + `cargo check` green. A cross-cutting
+On `main`, **397 tests green**, typecheck + `cargo check` green. A cross-cutting
 integration test proves MCP + policy + audit compose end-to-end in one live
 session, and adversarial review passes hardened the security claims (honest
 audit-integrity framing + server-side chain verification, policy fails loud on a
@@ -70,7 +70,9 @@ onboarding** (in-app BYO-key: a recoverable `needs_setup` → paste-a-key writte
 the local encrypted store → `ready`, no restart), and the **v2 remote MCP gateway**
 (`@openharness/gateway`, now end to end). The CORE is the governed pipeline as an
 MCP server — pinned catalog, DPoP tokens, server-side PDP, post-decision credential
-broker, sandboxed connector runtime + egress/tap + a GitHub-read connector,
+broker, sandboxed connector runtime + egress/tap (the Postmark defense is active
+in a `notify` write connector that blocks an unsanctioned BCC before egress) +
+a GitHub-read connector,
 return-path redaction, authoritative audit, fail-closed approval, per-user
 isolation. The **TRANSPORT** now closes the loop: a definition declares a `gateway`
 (url + pinned pubkey + tools); a deployable HTTP entry (`startGatewayHttp`)
