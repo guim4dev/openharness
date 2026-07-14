@@ -11,3 +11,4 @@ export {
   isDeny,
 } from "./auth.ts";
 export type { GatewayClaims, Principal, Deny, IncomingRequest } from "./auth.ts";
+export { decide } from "./pdp.ts";

@@ -6,21 +6,22 @@ export class PolicyError extends Error {}
 
 const action = z.enum(["allow", "deny", "ask"]);
 
+const ruleSchema = z.object({
+  match: z.string().min(1),
+  action,
+  reason: z.string().optional(),
+});
+
 /**
  * Zod schema for `policy.json`. `default` is fail-closed: when the source omits
  * it the policy denies unmatched tool calls. `rules` defaults to an empty list.
  */
 export const policySchema: z.ZodType<Policy, z.ZodTypeDef, unknown> = z.object({
   default: action.default("deny"),
-  rules: z
-    .array(
-      z.object({
-        match: z.string().min(1),
-        action,
-        reason: z.string().optional(),
-      }),
-    )
-    .default([]),
+  rules: z.array(ruleSchema).default([]),
+  principals: z
+    .array(z.object({ group: z.string().min(1), rules: z.array(ruleSchema).default([]) }))
+    .optional(),
   models: z
     .object({
       allow: z.array(z.string().min(1)).optional(),
@@ -49,7 +50,11 @@ export function parsePolicy(raw: unknown): Policy {
   // name (`(x)`) or unbalanced parens (`bash(x`, `bash(x))`) — would fall
   // through to plain tool-name globbing and silently never match. A security
   // rule must never silently become a no-op, so we reject those at load time.
-  for (const rule of parsed.data.rules) {
+  const allRules = [
+    ...parsed.data.rules,
+    ...(parsed.data.principals ?? []).flatMap((p) => p.rules),
+  ];
+  for (const rule of allRules) {
     if (isMalformedMatch(rule.match)) {
       throw new PolicyError(
         `policy rule ${JSON.stringify(rule.match)}: malformed match — expected a plain tool-name glob or a parameterized \`name(<glob>)\` with a non-empty name and balanced parens`,

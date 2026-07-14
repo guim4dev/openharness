@@ -39,6 +39,17 @@ export interface PolicyModels {
 }
 
 /**
+ * A per-principal rule set. When a caller belongs to `group` (an IdP group),
+ * these rules are evaluated BEFORE the base `rules`, so a group can grant or
+ * deny ahead of the shared policy. Used by the remote MCP gateway's server-side
+ * PDP; ignored by the local in-process enforcement (which has no principal).
+ */
+export interface PrincipalRules {
+  group: string;
+  rules: PolicyRule[];
+}
+
+/**
  * A resolved, validated policy. `default` governs unmatched tool calls and is
  * `deny` when the source omits it (fail-closed).
  */
@@ -47,6 +58,8 @@ export interface Policy {
   rules: PolicyRule[];
   models?: PolicyModels;
   redact?: RedactRule[];
+  /** Per-principal (IdP-group) rule sets, evaluated ahead of `rules` by the gateway PDP. */
+  principals?: PrincipalRules[];
 }
 
 /** Result of evaluating a single tool call against a policy. */

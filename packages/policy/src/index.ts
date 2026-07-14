@@ -3,6 +3,7 @@ export type {
   PolicyAction,
   PolicyRule,
   PolicyModels,
+  PrincipalRules,
   RedactRule,
   ToolEvaluation,
 } from "./types.ts";
