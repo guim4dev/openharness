@@ -20,3 +20,7 @@ export { createGithubReadConnector } from "./connectors/github-read.ts";
 export { sanitizeResult } from "./redact-return.ts";
 export { auditGovernedCall } from "./audit-endpoint.ts";
 export type { GovernedCallRecord } from "./audit-endpoint.ts";
+export { createApprovalQueue } from "./approval.ts";
+export type { ApprovalQueue, PendingApproval } from "./approval.ts";
+export { createConnectorSessions } from "./sessions.ts";
+export type { ConnectorSessions } from "./sessions.ts";
