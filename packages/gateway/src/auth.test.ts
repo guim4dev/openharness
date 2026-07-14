@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import {
   createDpopProof,
+  createReplayGuard,
   generateAuthKeypair,
   isDeny,
   mintGatewayToken,
@@ -44,6 +45,32 @@ test("a valid token + matching-key DPoP proof yields the principal", () => {
     expect(r.sub).toBe("alice@acme.test");
     expect(r.groups).toEqual(["eng"]);
   }
+});
+
+test("a proof is single-use under a ReplayGuard — the same proof cannot be replayed", () => {
+  const { gw, client, token } = setup();
+  const dpopProof = createDpopProof(client.privateKey, req, NOW);
+  const replayGuard = createReplayGuard();
+  const args = [{ ...req, token, dpopProof, clientPublicKeyPem: client.publicKey }, gw.publicKey, { now: NOW, replayGuard }] as const;
+
+  const first = validateRequest(...args);
+  expect(isDeny(first)).toBe(false); // legit request accepted
+
+  const replay = validateRequest(...args); // identical proof, still inside the window
+  expect(isDeny(replay)).toBe(true);
+  if (isDeny(replay)) expect(replay.deny).toMatch(/replay/);
+});
+
+test("the proof freshness window is 60s (a 2-minute-old proof is stale)", () => {
+  const { gw, client, token } = setup();
+  const dpopProof = createDpopProof(client.privateKey, req, NOW - 120_000);
+  const r = validateRequest(
+    { ...req, token, dpopProof, clientPublicKeyPem: client.publicKey },
+    gw.publicKey,
+    { now: NOW },
+  );
+  expect(isDeny(r)).toBe(true);
+  if (isDeny(r)) expect(r.deny).toMatch(/stale/);
 });
 
 test("a stolen token presented with a DIFFERENT proof key is denied (off-machine replay)", () => {

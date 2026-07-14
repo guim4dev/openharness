@@ -1,4 +1,4 @@
-import { createDpopProof, validateRequest, type Deny, type Principal } from "./auth.ts";
+import { createDpopProof, validateRequest, type Deny, type Principal, type ReplayGuard } from "./auth.ts";
 
 /**
  * DPoP over HTTP — the glue between the harness (MCP client) and the gateway
@@ -83,6 +83,7 @@ export function dpopFromHttp(
   req: { method: string; url: string },
   gatewayPublicKeyPem: string,
   now: number = Date.now(),
+  replayGuard?: ReplayGuard,
 ): Principal | Deny {
   const auth = header(headers, "authorization");
   const token = auth?.startsWith("DPoP ") ? auth.slice("DPoP ".length) : undefined;
@@ -98,6 +99,6 @@ export function dpopFromHttp(
       url: proofUrl(req.url),
     },
     gatewayPublicKeyPem,
-    { now },
+    { now, ...(replayGuard ? { replayGuard } : {}) },
   );
 }

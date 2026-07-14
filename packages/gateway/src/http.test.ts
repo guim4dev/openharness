@@ -4,8 +4,8 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { InMemorySecretStore } from "@openharness/credentials";
 import { parsePolicy } from "@openharness/policy";
 import type { AuditEntry, AuditSink } from "@openharness/audit";
-import { generateAuthKeypair, mintGatewayToken, type GatewayClaims } from "./auth.ts";
-import { createDpopFetch } from "./dpop-http.ts";
+import { createDpopProof, generateAuthKeypair, mintGatewayToken, type GatewayClaims } from "./auth.ts";
+import { createDpopFetch, dpopHeaders, proofUrl } from "./dpop-http.ts";
 import { startGatewayHttp, type GatewayHttpServer } from "./http.ts";
 import { createConnectorSessions } from "./sessions.ts";
 import { createGithubReadConnector } from "./connectors/github-read.ts";
@@ -96,4 +96,22 @@ test("e2e over real HTTP: a client WITHOUT DPoP is rejected at the edge (401)", 
   const transport = new StreamableHTTPClientTransport(new URL(url)); // plain fetch, no DPoP
   const mcp = new Client({ name: "attacker", version: "0" }, { capabilities: {} });
   await expect(mcp.connect(transport)).rejects.toThrow();
+});
+
+test("e2e over real HTTP: a captured DPoP proof cannot be replayed (second identical request → 401)", async () => {
+  const { gateway, url } = await boot();
+  const client = generateAuthKeypair();
+  const token = mintGatewayToken(CLAIMS, gateway.privateKey, client.publicKey, { ttlMs: 60_000, now: Date.now() });
+  // One fixed proof for POST /mcp — as an attacker who captured a single request would have.
+  const proof = createDpopProof(client.privateKey, { method: "POST", url: proofUrl(url) }, Date.now());
+  const headers = { "content-type": "application/json", ...dpopHeaders(token, proof, client.publicKey) };
+  const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
+
+  // First use passes the edge (whatever the body yields, it is NOT an auth 401).
+  const first = await fetch(url, { method: "POST", headers, body });
+  expect(first.status).not.toBe(401);
+
+  // Replaying the SAME proof (same jti) is rejected at the edge.
+  const second = await fetch(url, { method: "POST", headers, body });
+  expect(second.status).toBe(401);
 });

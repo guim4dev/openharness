@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { isDeny } from "./auth.ts";
+import { createReplayGuard, isDeny } from "./auth.ts";
 import { dpopFromHttp } from "./dpop-http.ts";
 import { createGateway, type GatewayPipeline } from "./server.ts";
 import type { ToolSpec } from "./catalog.ts";
@@ -44,6 +44,9 @@ function unauthorized(res: ServerResponse): void {
 export async function startGatewayHttp(opts: GatewayHttpOptions): Promise<GatewayHttpServer> {
   const path = opts.path ?? "/mcp";
   const host = opts.host ?? "127.0.0.1";
+  // One replay guard for the server: a DPoP proof id authenticates exactly one
+  // request, so a captured proof cannot be replayed inside its freshness window.
+  const replayGuard = createReplayGuard();
 
   const httpServer = createServer((req, res) => {
     void handle(req, res);
@@ -61,6 +64,8 @@ export async function startGatewayHttp(opts: GatewayHttpOptions): Promise<Gatewa
       req.headers as Record<string, string | undefined>,
       { method: req.method ?? "POST", url },
       opts.gatewayPublicKeyPem,
+      Date.now(),
+      replayGuard,
     );
     if (isDeny(principal)) {
       unauthorized(res);

@@ -1,4 +1,4 @@
-import { createHash, generateKeyPairSync, sign, verify } from "node:crypto";
+import { createHash, generateKeyPairSync, randomBytes, sign, verify } from "node:crypto";
 
 /**
  * Gateway authentication: short-lived, **DPoP-bound** access tokens.
@@ -90,6 +90,32 @@ interface ProofPayload {
   htm: string;
   htu: string;
   iat: number;
+  /** Unique per-proof id — single-use, so a captured proof cannot be replayed. */
+  jti: string;
+}
+
+/**
+ * Single-use guard for DPoP proof ids. A validated proof's `jti` is recorded
+ * until it expires; a second request presenting the same `jti` is rejected. This
+ * is what makes an observed `(token, proof)` pair worthless for replay: the proof
+ * authenticates exactly one request, not every request for the freshness window.
+ */
+export interface ReplayGuard {
+  /** True if `jti` was already used (=> reject). Else record it until `notAfterMs` and return false. */
+  seen(jti: string, now: number, notAfterMs: number): boolean;
+}
+
+/** In-memory `ReplayGuard`; prunes expired ids lazily on each check. */
+export function createReplayGuard(): ReplayGuard {
+  const store = new Map<string, number>();
+  return {
+    seen(jti, now, notAfterMs) {
+      for (const [k, exp] of store) if (exp <= now) store.delete(k);
+      if (store.has(jti)) return true;
+      store.set(jti, notAfterMs);
+      return false;
+    },
+  };
 }
 
 /**
@@ -116,7 +142,7 @@ export function createDpopProof(
   req: { method: string; url: string },
   now: number,
 ): string {
-  const payload: ProofPayload = { htm: req.method, htu: req.url, iat: now };
+  const payload: ProofPayload = { htm: req.method, htu: req.url, iat: now, jti: randomBytes(16).toString("base64url") };
   return signCompact(payload, clientPrivateKeyPem);
 }
 
@@ -137,7 +163,7 @@ export interface IncomingRequest {
 export function validateRequest(
   req: IncomingRequest,
   gatewayPublicKeyPem: string,
-  opts: { now: number; proofMaxAgeMs?: number } = { now: Date.now() },
+  opts: { now: number; proofMaxAgeMs?: number; replayGuard?: ReplayGuard } = { now: Date.now() },
 ): Principal | Deny {
   if (!req.token) return { deny: "no token" };
   if (!req.dpopProof || !req.clientPublicKeyPem) return { deny: "no DPoP proof" };
@@ -152,10 +178,17 @@ export function validateRequest(
   // Binding: the proof key must be the key the token was bound to.
   if (token.cnf.jkt !== thumbprint(req.clientPublicKeyPem)) return { deny: "proof key not bound to token" };
 
-  // The proof must be for THIS request and recent (replay window).
+  // The proof must be for THIS request and recent (short replay window).
   if (proof.htm !== req.method || proof.htu !== req.url) return { deny: "proof htm/htu mismatch" };
-  const maxAge = opts.proofMaxAgeMs ?? 300_000;
+  const maxAge = opts.proofMaxAgeMs ?? 60_000;
   if (proof.iat > opts.now + 5_000 || proof.iat < opts.now - maxAge) return { deny: "proof stale" };
+
+  // Single-use: a proof id may authenticate exactly one request. Rejects a
+  // captured proof replayed inside the freshness window (any method/body).
+  if (opts.replayGuard) {
+    if (!proof.jti) return { deny: "proof missing jti" };
+    if (opts.replayGuard.seen(proof.jti, opts.now, opts.now + maxAge)) return { deny: "proof replayed" };
+  }
 
   return {
     sub: token.sub,
