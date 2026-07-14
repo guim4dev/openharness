@@ -393,3 +393,56 @@ layer below what it assembles.
 ### References (Odysseus)
 
 - GitHub — https://github.com/pewdiepie-archdaemon/odysseus
+
+## 13. Related work: OpenConnector — a candidate COMPONENT for the v2 gateway (2026-07-14)
+
+[OpenConnector](https://github.com/oomol-lab/open-connector) (oomol-lab,
+TypeScript, self-hostable — Node/Docker/Cloudflare Workers/Fly; SQLite/D1) is an
+**open-source connector gateway for AI agents**: a credential/authorization
+**broker** between agents and **1,000+ SaaS providers / 10,000+ prebuilt
+actions**, exposed over MCP (`/mcp`), HTTP/OpenAPI, an SDK, and a CLI. Users
+connect an account once; agents discover + execute actions **without ever seeing
+raw credentials** (server-side API-key/OAuth handling, token refresh,
+per-connection scope + allow/block policy, redacted run logs, persistent audit).
+
+**Unlike Omnigent (§11) and Odysseus (§12), this is not a different category —
+it is almost exactly our v2 gateway's connector/credential-broker layer, already
+built.** That makes it a candidate **build-on component**, not a competitor.
+
+**The compelling split — delegate the connector layer, keep the governance layer:**
+- **Delegate to OpenConnector:** the credential broker + OAuth flows + the
+  1,000+ provider/action catalog + execution. We will never hand-build 1,000
+  connectors (our v2 plan ships *one*, GitHub-read, to prove the shape). Its
+  "agents never see secrets" broker model is aligned with our **no-token-
+  passthrough** invariant (verify, don't assume — see diligence).
+- **OpenHarness keeps (its differentiated governance the broker doesn't provide):**
+  the **signed definition + pinned virtual catalog** (supply-chain: what the
+  org's branded harness exposes, cryptographically pinned — OpenConnector has no
+  signed-distribution story); the **same policy engine as local** (deny-by-
+  default, argument-level, per-principal) enforced consistently client+gateway;
+  the **hash-chained audit cross-checked with the harness's local chain**;
+  **DPoP-bound harness identity**; and the whole *company-brands-and-ships-a-
+  governed-harness-to-employees* product. OpenConnector becomes the execution +
+  credential + catalog layer **beneath** OpenHarness's governance + distribution.
+
+**Diligence before betting (infra decision — evidence first):** verify maturity
+(prod-readiness, issue backlog, release churn, real multi-tenant use); confirm it
+truly brokers (never forwards an inbound token — no confused deputy); confirm the
+self-hosted path is first-class (not a funnel to the hosted SaaS); check the
+license; and confirm its per-connection policy composes with — doesn't replace —
+our arg-level/per-principal policy. Default skeptical about adopting a core
+dependency that holds every org credential.
+
+**Impact on the in-progress v2 build:** the gateway I'm building is mostly the
+**governance layer** — DPoP auth, the PDP (shared policy engine), the pinned
+catalog, return-path redaction, the authoritative audit chain, fail-closed
+approval, per-user session isolation. That stands **regardless**. Only the
+**credential broker** (`KmsStore`) and **connectors** (the one GitHub-read
+adapter) overlap OpenConnector; if we integrate, those become a thin
+**OpenConnector adapter** behind the same `KmsStore`/`Connector` interfaces
+(designed to be swappable for exactly this reason) rather than our own KMS +
+hand-built connectors. No governance work is wasted.
+
+### References (OpenConnector)
+
+- GitHub — https://github.com/oomol-lab/open-connector
