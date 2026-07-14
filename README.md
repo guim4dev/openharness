@@ -43,6 +43,10 @@ export ANTHROPIC_API_KEY=sk-...
 npm run chat -- harnesses/example "Say hello in one line."
 ```
 
+Want your own harness instead of the bundled example? `openharness init my-harness`
+scaffolds a minimal, valid, offline-safe one to start from (see
+[`docs/AUTHORING.md`](docs/AUTHORING.md)).
+
 Your key is written to an encrypted on-disk store (never logged, never printed).
 Prefer a config file over env vars? Create `accounts.json` in your OpenHarness
 config dir (`~/Library/Application Support/openharness` on macOS,
