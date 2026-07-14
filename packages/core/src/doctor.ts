@@ -43,13 +43,22 @@ async function pathExists(p: string): Promise<boolean> {
 }
 
 /**
- * Whether an npm package spec carries a version pin. Scoped specs
- * (`@scope/name`) are pinned only when an `@version` follows the scope
- * (`@scope/name@1.2.3`); unscoped when they contain any `@` (`name@1.2.3`).
+ * Whether an npm package spec is pinned to a CONCRETE version. A concrete
+ * version starts with a digit and carries no range/tag: `@1.2.3`, `@2025.9.0`,
+ * or a prerelease `@1.2.3-beta.1`. Moving targets are NOT pinned — dist-tags
+ * (`@latest`, `@next`, `@beta`) and ranges (`@^1.0.0`, `@~2`, `@1.x`, `@*`,
+ * `@>=1`) all re-resolve on the next launch, exactly the risk this catches.
+ * Non-registry specs (a local path, `file:`, a git/URL) aren't npx-latest
+ * fetches, so they're treated as pinned (not flagged).
  */
 function npmSpecIsPinned(spec: string): boolean {
+  if (spec.startsWith(".") || spec.startsWith("/") || spec.includes(":")) return true;
   const body = spec.startsWith("@") ? spec.slice(1) : spec;
-  return body.includes("@");
+  const at = body.indexOf("@");
+  if (at < 0) return false; // bare name, no version
+  const version = body.slice(at + 1);
+  // Concrete: first char a digit, and no range operator / wildcard anywhere.
+  return /^\d/.test(version) && !/[\^~*xX><|\s]/.test(version);
 }
 
 export async function runDoctor(defDir: string): Promise<DoctorReport> {

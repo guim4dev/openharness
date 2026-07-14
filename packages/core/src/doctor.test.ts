@@ -166,6 +166,39 @@ test("an unpinned npx MCP server is a supply-chain warning; a pinned one is not"
   expect(codes((await runDoctor(pinned)).problems)).not.toContain("mcp-server-unpinned");
 });
 
+test("the unpinned check treats dist-tags and ranges as unpinned, concrete versions as pinned", async () => {
+  const mk = (pkg: string) =>
+    writeDef(
+      baseManifest({
+        mcp: {
+          servers: { s: { transport: "stdio", command: "npx", args: ["-y", pkg] } },
+        },
+      }),
+    );
+  const warns = async (pkg: string) =>
+    codes((await runDoctor(mk(pkg))).problems).includes("mcp-server-unpinned");
+
+  // Moving targets — must warn.
+  for (const moving of [
+    "@scope/srv@latest",
+    "@scope/srv@next",
+    "@scope/srv@^1.0.0",
+    "@scope/srv@~2.0.0",
+    "@scope/srv@1.x",
+    "@scope/srv@*",
+    "srv@latest",
+    "srv", // bare name
+  ]) {
+    expect(await warns(moving), moving).toBe(true);
+  }
+  // Concrete pins (incl. prerelease) — must NOT warn.
+  for (const pinned of ["@scope/srv@2025.9.0", "@scope/srv@1.2.3", "@scope/srv@1.2.3-beta.1", "srv@0.6.2"]) {
+    expect(await warns(pinned), pinned).toBe(false);
+  }
+  // Not a registry fetch (local path) — not flagged.
+  expect(await warns("./local-server.js")).toBe(false);
+});
+
 test("the unpinned check ignores http servers and non-npx commands", async () => {
   const dir = writeDef(
     baseManifest({
