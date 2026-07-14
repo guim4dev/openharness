@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "main": "src/index.ts",
+  "bin": { "openharness-gateway": "src/cli.ts" },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
     "@openharness/definition": "0.0.1",
