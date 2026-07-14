@@ -20,6 +20,25 @@ function flag(args: string[], name: string): string | undefined {
   return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
 }
 
+const USAGE = `openharness — build and run a company's own governed AI harness
+
+Usage:
+  openharness <harness-dir> "<message>"       one live turn (bring your own key)
+  openharness chat <harness-dir> "<message>"  same, explicit form
+  openharness init <dir> [--name N] [--display D] [--provider P] [--model M]
+                                              scaffold a starter definition
+  openharness doctor <harness-dir>            preflight a definition (no build)
+  openharness keygen --out <prefix>           write <prefix>.key (0600) + <prefix>.pub
+  openharness bundle <dir> --out <file> --key <privkey>            sign a bundle
+  openharness bundle verify <file> --pubkey <pub> [--min-version X]  verify a bundle
+  openharness build <dir> --key <privkey> --out <dir> [--org X] [--name Y]
+                                              definition -> branded, signed app
+  openharness serve --bundles <dir> --audit <dir> [--host H] [--port N]
+                                              bundle host + audit sink
+  openharness audit verify <file>             recompute the audit hash chain
+
+Docs: https://github.com/guim4dev/openharness`;
+
 /**
  * `openharness chat <harness-path> "<message>"` — one live turn against a
  * harness using a bring-your-own-key credential (ANTHROPIC_API_KEY etc. or
@@ -31,6 +50,19 @@ function flag(args: string[], name: string): string | undefined {
  */
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+
+  // Top-level help. Only explicit help tokens or no args print the subcommand
+  // list — an unknown args[0] is NOT hijacked, since `openharness <dir> "<msg>"`
+  // is the implicit-chat shorthand (any non-subcommand first arg is a harness
+  // path). Explicit help → stdout, exit 0; no args → stderr, exit 2 (nothing to do).
+  if (args[0] === "help" || args[0] === "-h" || args[0] === "--help") {
+    process.stdout.write(`${USAGE}\n`);
+    process.exit(0);
+  }
+  if (args.length === 0) {
+    process.stderr.write(`${USAGE}\n`);
+    process.exit(2);
+  }
 
   // `openharness audit verify <file>` — recompute the hash chain and report the
   // first broken entry (exit 1) or OK (exit 0).
