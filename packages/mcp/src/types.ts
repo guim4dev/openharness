@@ -40,6 +40,14 @@ export interface McpConnection {
 }
 
 /**
+ * A `fetch`-shaped function injected into the streamable-HTTP transport. Used to
+ * reach a remote MCP gateway with per-request auth (e.g. a DPoP proof) that a
+ * static header map cannot express — the auth logic lives in the caller, keeping
+ * this package agnostic of any particular scheme.
+ */
+export type GatewayFetch = (input: unknown, init?: RequestInit) => Promise<Response>;
+
+/**
  * Resolves a credential REF name to its secret value from the machine-local
  * store, or `undefined` when the store holds no such ref. Structurally the same
  * shape as `SecretStore.get`, so a store can be adapted with `store.get.bind(store)`

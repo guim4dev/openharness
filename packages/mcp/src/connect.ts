@@ -2,7 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { McpServerSpec } from "@openharness/definition";
-import type { McpCallToolResult, McpConnection, McpToolInfo, SecretResolver } from "./types.ts";
+import type { GatewayFetch, McpCallToolResult, McpConnection, McpToolInfo, SecretResolver } from "./types.ts";
 
 const CLIENT_INFO = { name: "openharness", version: "0.0.1" };
 
@@ -102,6 +102,26 @@ export async function connectMcpServer(
   const client = new Client(CLIENT_INFO);
   await client.connect(transport);
 
+  return wrapClient(client);
+}
+
+/**
+ * Connect to a remote MCP gateway over streamable HTTP using an injected
+ * `fetch`. The gateway's authentication (a DPoP-bound token + a fresh per-request
+ * proof) is expressed by `fetchImpl`, which the caller builds — this package
+ * stays agnostic of the scheme and simply threads the fetch into the transport.
+ * The SDK runs the MCP `initialize` handshake inside `client.connect(...)`.
+ */
+export async function connectGatewayServer(url: string, fetchImpl: GatewayFetch): Promise<McpConnection> {
+  const transport = new StreamableHTTPClientTransport(new URL(url), {
+    fetch: fetchImpl as unknown as typeof fetch,
+  });
+  const client = new Client(CLIENT_INFO);
+  await client.connect(transport);
+  return wrapClient(client);
+}
+
+function wrapClient(client: Client): McpConnection {
   return {
     async listTools() {
       const { tools } = await client.listTools();

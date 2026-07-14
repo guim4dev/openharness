@@ -16,6 +16,8 @@ import { loadVerifiedDefinition } from "@openharness/bundle";
 import type { AuthProviderRegistry, CredentialManager, SecretStore } from "@openharness/credentials";
 import { loadMcpTools } from "@openharness/mcp";
 import type { ConnectFn } from "@openharness/mcp";
+import { loadGatewayTools } from "./gateway-bridge.ts";
+import type { GatewayAuth, LoadGatewayToolsOptions } from "./gateway-bridge.ts";
 import { checkModel } from "@openharness/policy";
 import type { Policy } from "@openharness/policy";
 import { createFileAuditLog } from "@openharness/audit";
@@ -94,6 +96,21 @@ export interface CreateLiveSessionOptions {
    * an in-memory server here; when omitted, the real stdio/http connector is used.
    */
   mcpConnect?: ConnectFn;
+  /**
+   * DPoP auth material for a declared remote `gateway` (a short-lived token bound
+   * to the client keypair that signs per-request proofs). REQUIRED when the
+   * definition declares a `gateway`: without it the session fails to boot
+   * (offline hard-fail) rather than run without the governed remote tools.
+   * Ignored when the definition declares no gateway.
+   */
+  gatewayAuth?: GatewayAuth;
+  /**
+   * Advanced/test seam: override how the gateway connection is established (and
+   * the bridged-tool namespace). Forwarded verbatim to `loadGatewayTools`, so a
+   * bridged gateway tool still enters the session as `mcp__<namespace>__<tool>`
+   * and flows through the SAME local policy/audit path as production.
+   */
+  gatewayOptions?: LoadGatewayToolsOptions;
   /**
    * Where to write the hash-chained audit log. Auditing is OFF unless BOTH a
    * policy is in effect AND this path is set (opt-in), so existing hermetic
@@ -265,7 +282,25 @@ export async function createLiveSession(opts: CreateLiveSessionOptions): Promise
         }
       : {}),
   });
-  const allTools: ToolDefinition[] = [...mcpTools, ...(opts.customTools ?? [])];
+  // Connect a declared remote gateway (v2) and bridge its governed tools into Pi
+  // as `mcp__<namespace>__<tool>`. Fail-closed: a declared gateway is mandatory —
+  // missing auth or an unreachable gateway throws here (offline hard-fail) rather
+  // than silently starting without the governed remote tools. No `gateway`
+  // section => this is skipped entirely (existing harnesses are unaffected).
+  let gatewayTools: ToolDefinition[] = [];
+  let disposeGateway: () => Promise<void> = async () => {};
+  if (def.manifest.gateway) {
+    if (!opts.gatewayAuth) {
+      throw new Error(
+        `Harness declares a remote gateway ('${def.manifest.gateway.url}') but no gatewayAuth was provided — refusing to boot without the governed remote tools (fail-closed).`,
+      );
+    }
+    const loaded = await loadGatewayTools(def.manifest.gateway, opts.gatewayAuth, opts.gatewayOptions ?? {});
+    gatewayTools = loaded.tools;
+    disposeGateway = loaded.dispose;
+  }
+
+  const allTools: ToolDefinition[] = [...mcpTools, ...gatewayTools, ...(opts.customTools ?? [])];
 
   const { session } = await createAgentSessionFromServices({
     services,
@@ -343,6 +378,7 @@ export async function createLiveSession(opts: CreateLiveSessionOptions): Promise
       if (session.isStreaming) await session.abort();
       session.dispose();
       await disposeMcp();
+      await disposeGateway();
       await auditSink?.close?.();
     },
   };
