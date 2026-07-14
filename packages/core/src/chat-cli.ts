@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { chmodSync, readFileSync, writeFileSync } from "node:fs";
-import { verifyAuditLog } from "@openharness/audit";
+import { auditExportToNdjson, exportAuditLog, verifyAuditLog } from "@openharness/audit";
 import { buildHarnessApp } from "@openharness/build";
 import {
   BundleVerificationError,
@@ -36,6 +36,8 @@ Usage:
   openharness serve --bundles <dir> --audit <dir> [--host H] [--port N]
                                               bundle host + audit sink
   openharness audit verify <file>             recompute the audit hash chain
+  openharness audit export <file> [--since ISO] [--until ISO] [--type t1,t2] [--out FILE]
+                                              compliance export (NDJSON + integrity manifest)
 
 Docs: https://github.com/guim4dev/openharness`;
 
@@ -68,17 +70,39 @@ async function main(): Promise<void> {
   // first broken entry (exit 1) or OK (exit 0).
   if (args[0] === "audit") {
     const [, sub, file] = args;
-    if (sub !== "verify" || !file) {
-      process.stderr.write("usage: openharness audit verify <file>\n");
-      process.exit(2);
+    if (sub === "verify" && file) {
+      const result = verifyAuditLog(file);
+      if (result.ok) {
+        process.stdout.write(`audit log OK: ${file}\n`);
+        process.exit(0);
+      }
+      process.stderr.write(`audit log BROKEN at entry ${result.brokenAt}: ${file}\n`);
+      process.exit(1);
     }
-    const result = verifyAuditLog(file);
-    if (result.ok) {
-      process.stdout.write(`audit log OK: ${file}\n`);
-      process.exit(0);
+    if (sub === "export" && file) {
+      const since = flag(args, "--since");
+      const until = flag(args, "--until");
+      const typesRaw = flag(args, "--type");
+      const out = flag(args, "--out");
+      const exported = exportAuditLog(file, {
+        ...(since ? { since } : {}),
+        ...(until ? { until } : {}),
+        ...(typesRaw ? { types: typesRaw.split(",").map((t) => t.trim()).filter(Boolean) } : {}),
+      });
+      const ndjson = auditExportToNdjson(exported);
+      if (out) {
+        writeFileSync(out, ndjson);
+        process.stdout.write(
+          `exported ${exported.manifest.count}/${exported.manifest.totalCount} records to ${out} (verified=${exported.manifest.verified}, head=${exported.manifest.headHash ?? "none"})\n`,
+        );
+      } else {
+        process.stdout.write(ndjson);
+      }
+      // Exit nonzero when the source chain did not verify, so a pipeline can gate.
+      process.exit(exported.manifest.verified ? 0 : 1);
     }
-    process.stderr.write(`audit log BROKEN at entry ${result.brokenAt}: ${file}\n`);
-    process.exit(1);
+    process.stderr.write("usage: openharness audit verify <file> | openharness audit export <file> [--since ISO] [--until ISO] [--type t1,t2] [--out FILE]\n");
+    process.exit(2);
   }
 
   // `openharness keygen --out <prefix>` — write <prefix>.key (private, 0600) + <prefix>.pub.

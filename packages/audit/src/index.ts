@@ -246,3 +246,10 @@ export function verifyAuditLog(path: string, opts: FileAuditLogOptions = {}): Ve
   }
   return { ok: true };
 }
+
+// ---------------------------------------------------------------------------
+// Compliance export (SIEM / retention)
+// ---------------------------------------------------------------------------
+
+export { exportAuditLog, auditExportToNdjson } from "./export.ts";
+export type { AuditExport, AuditExportManifest, ExportFilter, ExportAuditLogOptions } from "./export.ts";
