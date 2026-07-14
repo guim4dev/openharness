@@ -49,6 +49,13 @@ export interface BuilderDraft {
   rules: BuilderRule[];
   skills: BuilderSkill[];
   mcpServers: BuilderMcpServer[];
+  /**
+   * Manifest fields the builder does NOT edit (version, `gateway` — including its
+   * pinned pubkey — `appendSystemPrompt`, `promptLibrary`, extra provider
+   * profiles, `branding.icon`, …), carried verbatim from a loaded definition so a
+   * load→edit→save round-trip never silently drops them. Absent for a fresh draft.
+   */
+  carry?: Record<string, unknown>;
 }
 
 export const emptyDraft: BuilderDraft = {
@@ -125,6 +132,25 @@ export function builderReducer(draft: BuilderDraft, action: BuilderAction): Buil
   }
 }
 
+/**
+ * Mirror of `@openharness/policy`'s `isMalformedMatch` — replicated here because
+ * this model is browser-safe (imports no workspace package). A `match` with
+ * parens must be a well-formed `name(<glob>)` with balanced inner parens;
+ * otherwise `parsePolicy` (inside doctor) rejects it, so we flag it live too.
+ */
+const PARAMETERIZED = /^([^()]+)\((.*)\)$/s;
+function matchIsMalformed(match: string): boolean {
+  if (!match.includes("(") && !match.includes(")")) return false;
+  const m = PARAMETERIZED.exec(match);
+  if (!m) return true;
+  let depth = 0;
+  for (const ch of m[2]) {
+    if (ch === "(") depth++;
+    else if (ch === ")" && --depth < 0) return true;
+  }
+  return depth !== 0;
+}
+
 /** Parse a comma-separated tool allowlist into a trimmed, non-empty array. */
 function parseTools(csv: string): string[] {
   return csv
@@ -135,13 +161,22 @@ function parseTools(csv: string): string[] {
 
 /** The `harness.json` object for a draft (systemPrompt lives in a sibling file). */
 export function draftToManifest(draft: BuilderDraft): Record<string, unknown> {
+  // Start from the carried original (minus the fields the builder OWNS), so
+  // version/gateway/appendSystemPrompt/promptLibrary/extra-providers/icon survive
+  // a round-trip; then overlay the edited fields.
+  const carry = (draft.carry ?? {}) as Record<string, unknown>;
+  const { branding: cBranding, providers: cProviders, mcp: _cMcp, ...rest } = carry;
+  const carryBranding = (cBranding ?? {}) as Record<string, unknown>;
+  const carryProviders = (cProviders ?? {}) as Record<string, unknown>;
   const manifest: Record<string, unknown> = {
+    ...rest,
     name: draft.name,
-    version: "0.1.0",
-    branding: { displayName: draft.displayName, accent: draft.accent },
+    version: typeof rest.version === "string" ? rest.version : "0.1.0",
+    branding: { ...carryBranding, displayName: draft.displayName, accent: draft.accent },
     systemPrompt: "system-prompt.md",
     skills: draft.skills.map((s) => ({ path: s.path, mandatory: s.mandatory })),
     providers: {
+      ...carryProviders,
       default: { provider: draft.provider, model: draft.model, credentialProfile: draft.credentialProfile },
     },
   };
@@ -198,6 +233,10 @@ export function draftFromManifest(
       url: String(spec.url ?? ""),
       tools: Array.isArray(spec.tools) ? (spec.tools as string[]).join(", ") : "",
     })),
+    // Preserve the full original so fields the form doesn't edit (version,
+    // gateway pin, extra providers, appendSystemPrompt, promptLibrary, icon)
+    // survive a load→edit→save round-trip.
+    carry: manifest,
   };
 }
 
@@ -229,6 +268,11 @@ export function validateDraft(draft: BuilderDraft): BuilderProblem[] {
   req(draft.credentialProfile, "credentialProfile", "Credential profile");
   draft.rules.forEach((r, i) => {
     if (!r.match.trim()) problems.push({ field: `rules.${i}.match`, message: `Rule ${i + 1} needs a match pattern.` });
+    else if (matchIsMalformed(r.match))
+      problems.push({
+        field: `rules.${i}.match`,
+        message: `Rule ${i + 1} match '${r.match}' is malformed — a parameterized match must be name(<glob>) with balanced parentheses.`,
+      });
   });
   draft.skills.forEach((s, i) => {
     if (!s.path.trim()) problems.push({ field: `skills.${i}.path`, message: `Skill ${i + 1} needs a path.` });

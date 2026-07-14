@@ -101,13 +101,41 @@ describe("serialization", () => {
     expect(m.mcp.servers.remote.tools).toBeUndefined(); // empty allowlist omitted
   });
 
-  test("round-trips: manifest+policy -> draft -> manifest+policy", () => {
+  test("round-trips the edited fields: manifest -> draft -> manifest", () => {
     const manifest = draftToManifest(filled);
     const policy = draftToPolicy(filled);
     const back = draftFromManifest(manifest, policy, filled.systemPrompt);
-    expect(back).toEqual(filled);
     expect(draftToManifest(back)).toEqual(manifest);
     expect(draftToPolicy(back)).toEqual(policy);
+    // The edited fields survived (carry is an internal passthrough, not compared).
+    const { carry: _c, ...editable } = back;
+    expect(editable).toEqual(filled);
+  });
+
+  test("preserves un-edited manifest fields (gateway pin, version, extra providers) across a round-trip", () => {
+    const rich = {
+      name: "acme-assistant",
+      version: "3.2.1",
+      branding: { displayName: "Acme", accent: "#4F46E5", icon: "branding/logo.png" },
+      systemPrompt: "system-prompt.md",
+      appendSystemPrompt: "lib:acme-base",
+      promptLibrary: "prompts",
+      skills: [],
+      providers: {
+        default: { provider: "anthropic", model: "claude-sonnet-5", credentialProfile: "work" },
+        fast: { provider: "anthropic", model: "claude-haiku-4-5", credentialProfile: "work" },
+      },
+      gateway: { url: "https://gw.acme.internal/mcp", pubkey: "PINNED_PUBKEY_PEM", tools: ["github__list_issues"] },
+    };
+    const back = draftFromManifest(rich, { default: "deny", rules: [] }, "prompt text");
+    const out = draftToManifest(back);
+    // The gateway pin — the whole fake-gateway defense — must survive.
+    expect(out.gateway).toEqual(rich.gateway);
+    expect(out.version).toBe("3.2.1");
+    expect(out.appendSystemPrompt).toBe("lib:acme-base");
+    expect(out.promptLibrary).toBe("prompts");
+    expect((out.branding as { icon?: string }).icon).toBe("branding/logo.png");
+    expect((out.providers as { fast?: unknown }).fast).toEqual(rich.providers.fast);
   });
 });
 
@@ -129,6 +157,18 @@ describe("validateDraft", () => {
   test("flags a rule with no match pattern", () => {
     const d: BuilderDraft = { ...filled, rules: [{ match: "", action: "deny" }] };
     expect(validateDraft(d).some((p) => p.field === "rules.0.match")).toBe(true);
+  });
+
+  test("flags a MALFORMED parameterized match that parsePolicy would reject", () => {
+    // `bash(x` (unbalanced) is valid-looking to a naive non-empty check but is
+    // rejected by parsePolicy inside doctor — the builder must not call it valid.
+    for (const bad of ["bash(x", "bash(x))", "(x)"]) {
+      const d: BuilderDraft = { ...filled, rules: [{ match: bad, action: "deny" }] };
+      expect(validateDraft(d).some((p) => p.field === "rules.0.match" && /malformed/.test(p.message)), bad).toBe(true);
+    }
+    // A well-formed parameterized match is fine.
+    const good: BuilderDraft = { ...filled, rules: [{ match: "bash(*rm*)", action: "deny" }] };
+    expect(validateDraft(good).some((p) => p.field === "rules.0.match")).toBe(false);
   });
 
   test("flags a skill with no path", () => {
