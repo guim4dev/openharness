@@ -199,6 +199,31 @@ test("the unpinned check treats dist-tags and ranges as unpinned, concrete versi
   expect(await warns("./local-server.js")).toBe(false);
 });
 
+test("the unpinned check spans npm-family, PyPI, and container runners", async () => {
+  const mk = (command: string, args: string[]) =>
+    writeDef(baseManifest({ mcp: { servers: { s: { transport: "stdio", command, args } } } }));
+  const warns = async (command: string, args: string[]) =>
+    codes((await runDoctor(mk(command, args))).problems).includes("mcp-server-unpinned");
+
+  // Unpinned across runners — must warn.
+  expect(await warns("bunx", ["srv"]), "bunx bare").toBe(true);
+  expect(await warns("pnpm", ["dlx", "srv@latest"]), "pnpm dlx latest").toBe(true);
+  expect(await warns("yarn", ["dlx", "@scope/srv"]), "yarn dlx bare").toBe(true);
+  expect(await warns("uvx", ["mcp-server"]), "uvx bare").toBe(true);
+  expect(await warns("uv", ["tool", "run", "mcp-server>=1"]), "uv tool run range").toBe(true);
+  expect(await warns("docker", ["run", "-i", "--rm", "org/mcp:latest"]), "docker tag").toBe(true);
+  expect(await warns("docker", ["run", "-i", "--rm", "org/mcp:1.2.3"]), "docker version tag (mutable)").toBe(true);
+
+  // Pinned across runners — must NOT warn.
+  expect(await warns("bunx", ["srv@1.2.3"]), "bunx pinned").toBe(false);
+  expect(await warns("pnpm", ["dlx", "@scope/srv@2.0.0"]), "pnpm dlx pinned").toBe(false);
+  expect(await warns("uvx", ["mcp-server==1.2.3"]), "uvx ==version").toBe(false);
+  expect(
+    await warns("docker", ["run", "-i", "--rm", "org/mcp@sha256:" + "a".repeat(64)]),
+    "docker digest",
+  ).toBe(false);
+});
+
 test("the unpinned check ignores http servers and non-npx commands", async () => {
   const dir = writeDef(
     baseManifest({

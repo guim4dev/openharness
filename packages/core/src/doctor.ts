@@ -61,6 +61,67 @@ function npmSpecIsPinned(spec: string): boolean {
   return /^\d/.test(version) && !/[\^~*xX><|\s]/.test(version);
 }
 
+/** A PyPI spec (uvx/uv) is pinned only by an exact `==<concrete>` (PEP 508). */
+function pypiSpecIsPinned(spec: string): boolean {
+  const m = /==\s*([^\s;,]+)/.exec(spec);
+  return !!m && /^\d/.test(m[1]) && !/[\^~*xX><|]/.test(m[1]);
+}
+
+/** basename of a command path (`/usr/bin/npx` -> `npx`). */
+function baseCommand(cmd: string): string {
+  const slash = cmd.lastIndexOf("/");
+  return slash >= 0 ? cmd.slice(slash + 1) : cmd;
+}
+
+/** First non-flag argument at or after `from`. */
+function firstPositional(args: string[], from = 0): string | undefined {
+  for (let i = from; i < args.length; i++) if (!args[i].startsWith("-")) return args[i];
+  return undefined;
+}
+
+/**
+ * A launch-time FETCH and whether its target is pinned. MCP servers are commonly
+ * run through a package/container runner that re-resolves its target on each
+ * launch — the Postmark-MCP class of supply-chain risk (a trusted upstream
+ * silently ships a new, possibly malicious build). We recognize the npm family
+ * (`npx`, `bunx`, `pnpm dlx`, `yarn dlx` — pinned by a concrete `@<version>`),
+ * the PyPI family (`uvx`, `uv tool run`/`uv x` — pinned by `==<version>`), and
+ * containers (`docker`/`podman run` — pinned ONLY by an `@sha256:` digest, since
+ * a tag is mutable). A locally-installed binary fetches nothing → `undefined`.
+ */
+interface RunnerPin {
+  runner: string;
+  target: string;
+  pinned: boolean;
+  /** How to pin it, for the finding message. */
+  hint: string;
+}
+
+function runnerPinStatus(command: string, args: string[]): RunnerPin | undefined {
+  const base = baseCommand(command);
+  const npm = (runner: string, target: string | undefined): RunnerPin | undefined =>
+    target ? { runner, target, pinned: npmSpecIsPinned(target), hint: `${target}@<version>` } : undefined;
+  const pypi = (runner: string, target: string | undefined): RunnerPin | undefined =>
+    target ? { runner, target, pinned: pypiSpecIsPinned(target), hint: `${target}==<version>` } : undefined;
+
+  if (base === "npx") return npm("npx", firstPositional(args));
+  if (base === "bunx") return npm("bunx", firstPositional(args));
+  if (base === "pnpm" && args[0] === "dlx") return npm("pnpm dlx", firstPositional(args, 1));
+  if (base === "yarn" && args[0] === "dlx") return npm("yarn dlx", firstPositional(args, 1));
+  if (base === "uvx") return pypi("uvx", firstPositional(args));
+  if (base === "uv" && args[0] === "x") return pypi("uv x", firstPositional(args, 1));
+  if (base === "uv" && args[0] === "tool" && args[1] === "run") return pypi("uv tool run", firstPositional(args, 2));
+  if ((base === "docker" || base === "podman") && args.includes("run")) {
+    // Pinned only by a content digest anywhere in the args — robust against
+    // docker's flag/value token soup, since we don't need to locate the image
+    // precisely, only whether a digest is present.
+    const pinned = args.some((a) => /@sha256:[0-9a-f]{64}/i.test(a));
+    const image = firstPositional(args, args.indexOf("run") + 1) ?? "<image>";
+    return { runner: base, target: image, pinned, hint: `${image.split("@")[0].split(":")[0]}@sha256:<digest>` };
+  }
+  return undefined;
+}
+
 export async function runDoctor(defDir: string): Promise<DoctorReport> {
   const problems: DoctorProblem[] = [];
 
@@ -113,20 +174,19 @@ export async function runDoctor(defDir: string): Promise<DoctorReport> {
     }
   }
 
-  // 3b. A stdio MCP server run via `npx` WITHOUT a pinned version fetches the
-  //     registry's "latest" on every launch — a supply-chain risk (a malicious or
-  //     breaking upstream update auto-ships, the Postmark-MCP class of incident).
-  //     Nudge pinning `<pkg>@<version>`. Warn (not error): unpinned still works.
+  // 3b. A stdio MCP server run through a launch-time FETCHER (npx/bunx/pnpm dlx/
+  //     yarn dlx, uvx/uv, docker/podman run) WITHOUT a pinned target re-resolves
+  //     on every launch — the Postmark-MCP class of supply-chain risk (a trusted
+  //     upstream silently ships a new build). Nudge pinning. Warn (not error):
+  //     unpinned still works, and a locally-installed binary is never flagged.
   for (const [server, spec] of Object.entries(manifest.mcp?.servers ?? {})) {
-    if (spec.transport !== "stdio") continue;
-    const cmd = spec.command ?? "";
-    if (cmd !== "npx" && !cmd.endsWith("/npx")) continue;
-    const pkg = (spec.args ?? []).find((a) => !a.startsWith("-"));
-    if (pkg && !npmSpecIsPinned(pkg))
+    if (spec.transport !== "stdio" || !spec.command) continue;
+    const run = runnerPinStatus(spec.command, spec.args ?? []);
+    if (run && !run.pinned)
       problems.push({
         level: "warn",
         code: "mcp-server-unpinned",
-        message: `mcp server '${server}' runs '${pkg}' via npx with no pinned version — pin it ('${pkg}@<version>') so a malicious or breaking upstream update can't auto-ship`,
+        message: `mcp server '${server}' runs '${run.target}' via ${run.runner} with no pinned ${run.runner === "docker" || run.runner === "podman" ? "digest" : "version"} — pin it ('${run.hint}') so a malicious or breaking upstream update can't auto-ship`,
       });
   }
 
