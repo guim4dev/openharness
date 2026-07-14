@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { verifyAuditLog } from "@openharness/audit";
+import { buildHarnessApp } from "@openharness/build";
 import {
   BundleVerificationError,
   bundleDefinition,
@@ -100,6 +101,37 @@ async function main(): Promise<void> {
     writeBundle(bundle, out);
     process.stdout.write(
       `wrote bundle ${out}: ${bundle.manifest.name}@${bundle.manifest.version}, ${Object.keys(bundle.manifest.files).length} files\n`,
+    );
+    process.exit(0);
+  }
+
+  // `openharness build <def-dir> --key <privkeyfile> --out <dir> [--org X] [--name Y]`
+  // — turn one HarnessDefinition into a branded, signed, ready-to-package Tauri
+  // project. Only the PUBLIC key is ever written into the output.
+  if (args[0] === "build") {
+    const defDir = args[1];
+    const keyFile = flag(args, "--key");
+    const out = flag(args, "--out");
+    const org = flag(args, "--org");
+    const name = flag(args, "--name");
+    if (!defDir || defDir.startsWith("--") || !keyFile || !out) {
+      process.stderr.write(
+        "usage: openharness build <def-dir> --key <privkeyfile> --out <dir> [--org X] [--name Y]\n",
+      );
+      process.exit(2);
+    }
+    const result = await buildHarnessApp({
+      defDir,
+      privateKeyPath: keyFile,
+      outDir: out,
+      org,
+      name,
+    });
+    process.stdout.write(
+      `built ${result.productName} (${result.identifier}) -> ${result.outDir}\n`,
+    );
+    process.stdout.write(
+      `  bundle ${result.bundle.name}@${result.bundle.version}; resources: ${result.resources.join(", ")}\n`,
     );
     process.exit(0);
   }
