@@ -1,0 +1,7 @@
+{
+  "name": "with-library-missing-lib",
+  "version": "0.1.0",
+  "branding": { "displayName": "No Library Assistant" },
+  "systemPrompt": "lib:base",
+  "providers": { "default": { "provider": "anthropic", "model": "claude-sonnet-5", "credentialProfile": "work" } }
+}

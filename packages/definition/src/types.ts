@@ -45,7 +45,26 @@ export interface HarnessManifest {
   name: string;
   version: string;
   branding: HarnessBranding;
+  /**
+   * A file path (resolved relative to the definition root, current default
+   * behavior) OR a curated-library ref `lib:<name>` resolved against
+   * `promptLibrary` — see `resolvePrompt` in `@openharness/prompts`.
+   */
   systemPrompt: string;
+  /**
+   * Optional text appended to the resolved `systemPrompt`, joined by a blank
+   * line. Same two forms as `systemPrompt`: a file path or a `lib:<name>` ref.
+   * Typically used to layer org-specific detail on top of a shared curated base.
+   */
+  appendSystemPrompt?: string;
+  /**
+   * Optional dir path (relative to the definition root) of a curated
+   * PromptLibrary — a directory of `.md` files with YAML frontmatter
+   * `{ name, description }` that `systemPrompt`/`appendSystemPrompt` can
+   * reference via `lib:<name>`. Must live INSIDE the definition dir for
+   * `bundleDefinition` to include it (see `@openharness/bundle`).
+   */
+  promptLibrary?: string;
   skills: HarnessSkillRef[];
   providers: { default: HarnessProviderConfig } & Record<string, HarnessProviderConfig>;
   /** Optional MCP servers whose tools are bridged into the agent as `mcp__<server>__<tool>`. */

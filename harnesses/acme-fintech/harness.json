@@ -2,7 +2,9 @@
   "name": "acme-fintech",
   "version": "0.1.0",
   "branding": { "displayName": "Acme Engineer", "accent": "#0E7C61" },
-  "systemPrompt": "system-prompt.md",
+  "promptLibrary": "prompts",
+  "systemPrompt": "lib:platform-eng-base",
+  "appendSystemPrompt": "system-prompt-acme.md",
   "skills": [{ "path": "skills/incident-triage", "mandatory": true }],
   "providers": {
     "default": { "provider": "anthropic", "model": "claude-sonnet-5", "credentialProfile": "platform-eng" }

@@ -1,0 +1,8 @@
+{
+  "name": "with-append-file",
+  "version": "0.1.0",
+  "branding": { "displayName": "Append File Assistant" },
+  "systemPrompt": "system-prompt.md",
+  "appendSystemPrompt": "append.md",
+  "providers": { "default": { "provider": "anthropic", "model": "claude-sonnet-5", "credentialProfile": "work" } }
+}

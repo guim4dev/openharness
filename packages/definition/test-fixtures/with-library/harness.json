@@ -1,0 +1,9 @@
+{
+  "name": "with-library",
+  "version": "0.1.0",
+  "branding": { "displayName": "Library Assistant" },
+  "promptLibrary": "prompts",
+  "systemPrompt": "lib:base",
+  "appendSystemPrompt": "lib:extra",
+  "providers": { "default": { "provider": "anthropic", "model": "claude-sonnet-5", "credentialProfile": "work" } }
+}

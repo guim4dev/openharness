@@ -49,6 +49,10 @@ export const harnessManifestSchema: z.ZodType<HarnessManifest, z.ZodTypeDef, unk
       .optional(),
   }),
   systemPrompt: z.string().min(1),
+  /** A file path (default) OR a curated-library ref of the form `lib:<name>`. */
+  appendSystemPrompt: z.string().min(1).optional(),
+  /** Dir path (relative to the definition root) of a curated PromptLibrary. */
+  promptLibrary: z.string().min(1).optional(),
   skills: z.array(z.object({ path: z.string().min(1), mandatory: z.boolean() })).default([]),
   providers: z.object({ default: providerConfig }).catchall(providerConfig),
   mcp: z.object({ servers: z.record(mcpServerSpec) }).optional(),

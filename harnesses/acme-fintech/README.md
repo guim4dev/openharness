@@ -2,6 +2,18 @@
 
 "Acme Engineer" — a platform-engineering assistant for an ~80-person fintech.
 
+- **System prompt is composed from a curated library, not inlined.**
+  `promptLibrary: "prompts"` points at this definition's own copy of the org's
+  shared, curated prompts (see `harnesses/_prompts/` for the source the org
+  maintains); `systemPrompt: "lib:platform-eng-base"` selects the approved base
+  prompt by NAME rather than embedding its text, and `appendSystemPrompt:
+  "system-prompt-acme.md"` layers Acme-specific detail (identity, "money-moving
+  infrastructure" framing, which internal MCP servers to check first) on top.
+  The library must live **inside** this definition dir — `bundleDefinition`
+  only walks files under the definition root, so a `promptLibrary` pointing
+  outside it wouldn't ship in the signed `.ohbundle`. `harnesses/example` and
+  `harnesses/northwind-ops` still use a plain-path `systemPrompt` (no library)
+  to prove that form keeps working unchanged.
 - **Posture:** deny-by-default (`policy.json` `"default": "deny"`). Reads,
   `git` via bash, and the two MCP servers below are explicitly allow-listed;
   everything else — including anything a rule doesn't anticipate — falls
