@@ -76,6 +76,25 @@ test("a manifest with no mcp section stays valid (backward compatible)", () => {
   expect(parsed.mcp).toBeUndefined();
 });
 
+test("accepts an optional remote MCP gateway (url + pinned pubkey + tools)", () => {
+  const withGateway = {
+    ...valid,
+    gateway: { url: "https://gw.acme.internal/mcp", pubkey: "-----BEGIN PUBLIC KEY-----\n…", tools: ["github__list_issues"] },
+  };
+  const parsed = harnessManifestSchema.parse(withGateway);
+  expect(parsed.gateway?.url).toBe("https://gw.acme.internal/mcp");
+  expect(parsed.gateway?.tools).toEqual(["github__list_issues"]);
+  // Absent by default (backward compatible).
+  expect(harnessManifestSchema.parse(valid).gateway).toBeUndefined();
+});
+
+test("rejects a gateway missing url or pubkey", () => {
+  expect(() => harnessManifestSchema.parse({ ...valid, gateway: { tools: [] } })).toThrow();
+  expect(() =>
+    harnessManifestSchema.parse({ ...valid, gateway: { url: "https://x", tools: [] } }),
+  ).toThrow();
+});
+
 test("rejects an stdio server missing command", () => {
   const bad = { ...valid, mcp: { servers: { local: { transport: "stdio" } } } };
   expect(() => harnessManifestSchema.parse(bad)).toThrow(/command/);

@@ -69,6 +69,25 @@ export interface HarnessManifest {
   providers: { default: HarnessProviderConfig } & Record<string, HarnessProviderConfig>;
   /** Optional MCP servers whose tools are bridged into the agent as `mcp__<server>__<tool>`. */
   mcp?: HarnessMcpConfig;
+  /** Optional remote MCP gateway (v2). See `HarnessGatewayConfig`. */
+  gateway?: HarnessGatewayConfig;
+}
+
+/**
+ * A remote MCP gateway the harness routes governed tools through (v2). The
+ * harness connects to `url` (an `@openharness/gateway` MCP server) over HTTP
+ * with a DPoP-bound token, PINS the server to `pubkey` (the gateway's ed25519
+ * public key, so a hostile network can't present a fake gateway), and exposes
+ * `tools` as `mcp__<gateway>__<tool>` — policy-gated locally too (defense in
+ * depth). The credential + egress live server-side; the machine never sees them.
+ */
+export interface HarnessGatewayConfig {
+  /** Base URL of the gateway's MCP endpoint. */
+  url: string;
+  /** The gateway's ed25519 public key (PEM), pinned in the signed definition. */
+  pubkey: string;
+  /** Tool names the gateway exposes (the pinned catalog the harness may call). */
+  tools: string[];
 }
 
 /** Resolved definition: all paths absolute, system prompt read into memory. */

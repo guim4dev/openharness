@@ -56,4 +56,11 @@ export const harnessManifestSchema: z.ZodType<HarnessManifest, z.ZodTypeDef, unk
   skills: z.array(z.object({ path: z.string().min(1), mandatory: z.boolean() })).default([]),
   providers: z.object({ default: providerConfig }).catchall(providerConfig),
   mcp: z.object({ servers: z.record(mcpServerSpec) }).optional(),
+  gateway: z
+    .object({
+      url: z.string().min(1),
+      pubkey: z.string().min(1),
+      tools: z.array(z.string()).default([]),
+    })
+    .optional(),
 });
