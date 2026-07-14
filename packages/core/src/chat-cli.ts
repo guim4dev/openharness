@@ -9,7 +9,7 @@ import {
   verifyBundle,
   writeBundle,
 } from "@openharness/bundle";
-import { ScaffoldError, scaffoldHarness } from "@openharness/definition";
+import { MaterializeError, ScaffoldError, scaffoldHarness, writeHarnessDefinition } from "@openharness/definition";
 import { createOpenHarnessServer } from "@openharness/server";
 import { runChat } from "./chat.ts";
 import { runDoctor } from "./doctor.ts";
@@ -27,6 +27,8 @@ Usage:
   openharness chat <harness-dir> "<message>"  same, explicit form
   openharness init <dir> [--name N] [--display D] [--provider P] [--model M]
                                               scaffold a starter definition
+  openharness materialize <spec.json> <out-dir>
+                                              write a full definition from a spec + run doctor
   openharness doctor <harness-dir> [--strict-supply-chain]
                                               preflight a definition (no build;
                                               --strict-supply-chain fails on unpinned MCP servers)
@@ -180,6 +182,47 @@ async function main(): Promise<void> {
       `doctor: ${label} has ${errors} error${errors === 1 ? "" : "s"}${warns ? ` and ${warns} warning${warns === 1 ? "" : "s"}` : ""}\n`,
     );
     process.exit(1);
+  }
+
+  // `openharness materialize <spec.json> <out-dir>` — write a COMPLETE definition
+  // from an in-memory spec (`{ manifest, policy?, systemPrompt }` — the shape the
+  // visual builder emits) and run doctor on the result. The headless counterpart
+  // to the visual builder, for automation. Exits non-zero on a doctor error.
+  if (args[0] === "materialize") {
+    const [, specPath, outDir] = args;
+    if (!specPath || specPath.startsWith("--") || !outDir) {
+      process.stderr.write("usage: openharness materialize <spec.json> <out-dir>\n");
+      process.exit(2);
+    }
+    let spec: { manifest: unknown; policy?: unknown; systemPrompt?: string };
+    try {
+      spec = JSON.parse(readFileSync(specPath, "utf8")) as typeof spec;
+    } catch (e) {
+      process.stderr.write(`materialize: '${specPath}' is not valid JSON: ${(e as Error).message}\n`);
+      process.exit(1);
+    }
+    try {
+      const result = await writeHarnessDefinition(outDir, {
+        manifest: spec.manifest,
+        ...(spec.policy !== undefined ? { policy: spec.policy } : {}),
+        systemPrompt: spec.systemPrompt ?? "",
+      });
+      const report = await runDoctor(result.rootDir);
+      for (const p of report.problems) {
+        const line = `  [${p.level === "error" ? "ERROR" : "warn"}] ${p.code}: ${p.message}\n`;
+        (p.level === "error" ? process.stderr : process.stdout).write(line);
+      }
+      process.stdout.write(
+        `materialized ${result.files.length} file(s) at ${result.rootDir} — doctor ${report.ok ? "OK" : "FAILED"}\n`,
+      );
+      process.exit(report.ok ? 0 : 1);
+    } catch (e) {
+      if (e instanceof MaterializeError) {
+        process.stderr.write(`materialize: ${e.message}\n`);
+        process.exit(1);
+      }
+      throw e;
+    }
   }
 
   if (args[0] === "bundle") {
