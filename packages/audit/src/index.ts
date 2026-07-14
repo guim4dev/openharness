@@ -50,6 +50,14 @@ export interface ToolCallEntry {
   /** `match` pattern of the winning rule; absent when the default decided. */
   ruleId?: string;
   argsHash: string;
+  /**
+   * Optional attribution, set by the remote MCP gateway's authoritative log: the
+   * principal (employee) the decision was made for, and the policy version it was
+   * made under (so the record self-describes which policy governed it). Absent in
+   * local (single-user, unversioned) enforcement.
+   */
+  principal?: string;
+  policyVersion?: string;
 }
 
 /** A tool result re-entered context. `resultHash` fingerprints the redacted result. */
