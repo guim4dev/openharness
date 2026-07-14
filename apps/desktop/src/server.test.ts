@@ -79,10 +79,13 @@ function bootServerTs(
       settled = true;
       child.kill("SIGTERM");
       reject(new Error("timed out waiting for the sidecar handshake"));
-      // Generous: this spawns a real node+tsx child that transpiles the sidecar
-      // on startup (~13s alone). Under the full suite's parallelism that startup
-      // is CPU-starved, so the floor must clear contention, not just cold start.
-    }, 60_000);
+      // Very generous: this spawns a real node+tsx child that transpiles the
+      // sidecar's whole import graph on startup (20-35s even in isolation on a
+      // busy machine). Under the full suite's parallelism those child processes
+      // are CPU-starved by the worker threads, so the floor must clear heavy
+      // contention, not just a cold start. CI (few cores, low parallelism) is
+      // comfortably under this; the margin is for loaded local dev machines.
+    }, 150_000);
     child.stdout.on("data", (d: Buffer) => {
       if (settled) return;
       buf += d.toString();
@@ -168,7 +171,7 @@ test(
       kill();
     }
   },
-  90_000,
+  210_000,
 );
 
 test(
@@ -190,5 +193,5 @@ test(
       kill();
     }
   },
-  90_000,
+  210_000,
 );
