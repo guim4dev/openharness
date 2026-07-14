@@ -14,3 +14,6 @@ export type { GatewayClaims, Principal, Deny, IncomingRequest } from "./auth.ts"
 export { decide } from "./pdp.ts";
 export { SecretStoreKms } from "./broker.ts";
 export type { KmsStore, UpstreamCredential } from "./broker.ts";
+export { egressAllowed, isPrivateHost, tapInjectedField } from "./egress.ts";
+export type { Connector, ConnectorResult } from "./connectors/index.ts";
+export { createGithubReadConnector } from "./connectors/github-read.ts";
