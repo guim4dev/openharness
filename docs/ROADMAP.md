@@ -71,6 +71,19 @@ credential and the network egress **server-side**: the harness calls the org
 gateway, the gateway holds the real credentials and talks to the third
 party, and the employee's machine never sees the secret.
 
+> **✓ Core built** (`@openharness/gateway`, 50 tests) — the governed pipeline as
+> an MCP server: pinned virtual catalog · DPoP-bound tokens · the shared policy
+> engine server-side (per-principal, argument-level) · a KMS-interface credential
+> broker resolved *after* the decision · a sandboxed connector runtime (egress
+> allowlist + forward-proxy tap + one first-party GitHub-read connector) ·
+> return-path redaction · authoritative hash-chained audit · fail-closed
+> server-side approval · per-user session isolation. **Remaining:** the
+> harness↔gateway **HTTP + DPoP transport wiring** (a definition declares a
+> `gateway`; core connects via the MCP http client adding a per-request DPoP
+> proof) + the offline hard-fail branch + deploy hardening. The connector/broker
+> layer is behind swappable interfaces so [OpenConnector](vision.md#13) can slot
+> in as the backend once it matures.
+
 This is also where the ecosystem's sharpest edges live, so the design is
 constrained by them rather than discovering them later:
 

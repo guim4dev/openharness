@@ -47,6 +47,19 @@ governed and signed, to a TUI and a desktop app. 254 tests, MIT, built on
   entry (`persistOnboardedAccount`) references the stored secret, which
   `loadAccounts` resolves on the next launch — so `accounts.json` never holds
   raw key material.
+- **v2 remote MCP gateway — CORE** (`@openharness/gateway`, 50 tests) — the
+  governed pipeline as an MCP server a harness connects to: a pinned virtual
+  tool catalog (never proxied live), DPoP-bound gateway tokens, the SAME policy
+  engine evaluated server-side (per-principal + argument-level), a KMS-interface
+  credential broker resolved only after the allow decision (the gateway holds
+  its own per-upstream credential — no token passthrough), a sandboxed connector
+  runtime with a per-connector egress allowlist + a forward-proxy tap (the
+  Postmark defense) + one first-party GitHub-read connector, return-path
+  redaction, an authoritative hash-chained audit, a fail-closed server-side
+  approval queue, and per-user upstream session isolation. Connector/broker sit
+  behind swappable interfaces (an OpenConnector backend can slot in later). The
+  harness↔gateway HTTP+DPoP transport wiring + offline branch + deploy hardening
+  remain.
 - **Example harnesses** — `acme-fintech` (deny-by-default, AWS-key redaction),
   `northwind-ops` (ask-on-writes, PII redaction), and `meridian-support` (the
   non-technical desktop operator: `bash` denied, ask-on-every-write, heavy PII

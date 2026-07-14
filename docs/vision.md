@@ -10,7 +10,7 @@ Last updated: 2026-07-14 (after an autonomous build night).
 
 ## 0. Current state (what's actually built)
 
-On `main`, **254 tests green**, typecheck + `cargo check` green. A cross-cutting
+On `main`, **312 tests green**, typecheck + `cargo check` green. A cross-cutting
 integration test proves MCP + policy + audit compose end-to-end in one live
 session, and an adversarial review pass hardened the security claims (honest
 audit-integrity framing + server-side chain verification, policy fails loud on a
@@ -55,9 +55,15 @@ data plane (5) + moat build pipeline (M1–M3), plus `openharness init`/`doctor`
 (scaffold + preflight, doctor also gating `build` and CI), a third example harness
 (`meridian-support`, the non-technical desktop operator), **v1.1 first-run desktop
 onboarding** (in-app BYO-key: a recoverable `needs_setup` → paste-a-key written to
-the local encrypted store → `ready`, no restart), and a design spec for the v2 remote
-MCP gateway (`docs/specs/`). **Deferred:** final `tauri build` + fresh-account validation (manual), OS
-code-signing, remote MCP gateway + credential pooling, builder UI, cloud.
+the local encrypted store → `ready`, no restart), and the **v2 remote MCP gateway
+CORE** (`@openharness/gateway`, 50 tests: the governed pipeline as an MCP server —
+pinned catalog, DPoP tokens, server-side PDP, post-decision credential broker,
+sandboxed connector runtime + egress/tap + a GitHub-read connector, return-path
+redaction, authoritative audit, fail-closed approval, per-user isolation).
+**Deferred:** the gateway's harness↔gateway HTTP+DPoP transport wiring + offline
+branch + deploy hardening (the core is built; this is the connection plumbing);
+final `tauri build` + fresh-account validation (manual); OS code-signing; a
+builder UI; cloud. (OpenConnector §13 may back the connector layer once mature.)
 
 ---
 
