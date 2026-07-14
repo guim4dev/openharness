@@ -12,3 +12,5 @@ export {
 } from "./auth.ts";
 export type { GatewayClaims, Principal, Deny, IncomingRequest } from "./auth.ts";
 export { decide } from "./pdp.ts";
+export { SecretStoreKms } from "./broker.ts";
+export type { KmsStore, UpstreamCredential } from "./broker.ts";
