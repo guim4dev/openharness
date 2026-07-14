@@ -5,6 +5,7 @@ export type {
   McpCallTool,
   McpConnection,
   ConnectFn,
+  SecretResolver,
 } from "./types.ts";
 export { connectMcpServer } from "./connect.ts";
 export { mcpToolToPiTool, mcpToolName } from "./bridge.ts";

@@ -1,7 +1,7 @@
 import { afterAll, expect, test } from "vitest";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { sign as cryptoSign } from "node:crypto";
 import { canonicalJSON } from "@openharness/audit";
@@ -108,6 +108,65 @@ test("loadVerifiedDefinition refuses to load a bundle signed by the wrong key", 
   writeBundle(bundle, out);
 
   await expect(loadVerifiedDefinition(out, attacker.publicKey)).rejects.toThrow(BundleVerificationError);
+});
+
+test("THE INVARIANT: a bundle carries only the credential REF name, never the resolved secret value", () => {
+  // A real-looking secret that, in production, lives ONLY in the machine's local
+  // SecretStore (EncryptedFileSecretStore) — it is provisioned out-of-band via
+  // `openharness creds`, never written into the definition dir. The harness.json
+  // references it by NAME; that ref is all that ships.
+  const REF = "acme-analytics-ro";
+  const SECRET = "pg-s3cr3t-Live-DBpw-0xDEADBEEF";
+
+  const defDir = tmp();
+  writeFileSync(
+    join(defDir, "harness.json"),
+    JSON.stringify({
+      name: "secret-indirection",
+      version: "1.0.0",
+      branding: { displayName: "X" },
+      systemPrompt: "system-prompt.md",
+      skills: [],
+      providers: { default: { provider: "anthropic", model: "m", credentialProfile: "work" } },
+      mcp: {
+        servers: {
+          analytics_readonly: {
+            transport: "stdio",
+            command: "npx",
+            args: ["-y", "@modelcontextprotocol/server-postgres", "postgresql://analytics_ro@db:5432/acme"],
+            // ENV VAR name -> credential REF name. The value is NOT here.
+            secrets: { PGPASSWORD: REF },
+            mandatory: false,
+            tools: ["query"],
+          },
+        },
+      },
+    }),
+  );
+  writeFileSync(join(defDir, "system-prompt.md"), "You are X.");
+
+  const { privateKey } = generateKeypair();
+  const bundle = bundleDefinition(defDir, privateKey);
+
+  // Serialize exactly as `writeBundle` would — these are the bytes that get
+  // signed and distributed as the .ohbundle.
+  const bytes = JSON.stringify(bundle, null, 2);
+
+  // The ref name IS carried: the base64-embedded harness.json decodes to it.
+  const harnessEntry = bundle.manifest.files["harness.json"];
+  const decoded = Buffer.from(harnessEntry.contentB64, "base64").toString("utf8");
+  expect(decoded).toContain(REF);
+
+  // The resolved secret value is NOWHERE in the bundle — not as raw text, not as
+  // base64 in any embedded file, not in the serialized bytes. This is the whole
+  // point of the indirection: only the REF travels; the secret stays in the
+  // machine-local store.
+  expect(bytes).not.toContain(SECRET);
+  expect(bytes).not.toContain(Buffer.from(SECRET, "utf8").toString("base64"));
+  for (const entry of Object.values(bundle.manifest.files)) {
+    const content = Buffer.from(entry.contentB64, "base64").toString("utf8");
+    expect(content).not.toContain(SECRET);
+  }
 });
 
 test("extractBundle rejects path-traversal entries", () => {

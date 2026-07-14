@@ -19,7 +19,8 @@
       "analytics_readonly": {
         "transport": "stdio",
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://analytics_ro@localhost:5432/acme_analytics"],
+        "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://analytics_ro@analytics-replica.internal:5432/acme_analytics"],
+        "secrets": { "PGPASSWORD": "acme-analytics-ro" },
         "mandatory": false,
         "tools": ["query"]
       }

@@ -39,5 +39,22 @@ export interface McpConnection {
   close(): Promise<void>;
 }
 
-/** Establishes a connection to an MCP server from its spec. Overridable in tests. */
-export type ConnectFn = (name: string, spec: McpServerSpec) => Promise<McpConnection>;
+/**
+ * Resolves a credential REF name to its secret value from the machine-local
+ * store, or `undefined` when the store holds no such ref. Structurally the same
+ * shape as `SecretStore.get`, so a store can be adapted with `store.get.bind(store)`
+ * — keeping this package decoupled from `@openharness/credentials`.
+ */
+export type SecretResolver = (ref: string) => Promise<string | undefined>;
+
+/**
+ * Establishes a connection to an MCP server from its spec. Overridable in tests.
+ * `resolveSecret` resolves the spec's `secrets` refs (env-var/header name ->
+ * credential ref) at connect time; a declared ref that cannot be resolved must
+ * fail the connection (fail-closed) rather than connect with a blank secret.
+ */
+export type ConnectFn = (
+  name: string,
+  spec: McpServerSpec,
+  resolveSecret?: SecretResolver,
+) => Promise<McpConnection>;

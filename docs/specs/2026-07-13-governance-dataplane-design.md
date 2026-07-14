@@ -22,8 +22,15 @@ Bring MCP to the harness (Pi has none), already the enforcement seam.
 - Each MCP tool → a Pi tool via `pi.registerTool`/`defineTool`, namespaced
   `mcp__<server>__<tool>`.
 - `harness.json` gains an `mcp` section: `{ servers: { <name>: { transport, command|url,
-  args?, env?, mandatory?: bool, tools?: allowlist } } }`. Mandatory servers must
-  connect or the harness fails fast.
+  args?, env?, headers?, secrets?, mandatory?: bool, tools?: allowlist } } }`. Mandatory
+  servers must connect or the harness fails fast.
+  - `secrets` (added) is credential **indirection**, never a value: it maps an ENV
+    VAR name (stdio) or HEADER name (http) to a credential **ref name**, resolved at
+    connect-time from the machine-local `SecretStore` and merged into the child env
+    (over literal `env`) / set on the http client's request headers (over literal
+    `headers`). A ref absent from the store fails the connection (fail-closed) — a
+    server's real secret never touches `harness.json` or the signed bundle. `headers`
+    (added) carries literal, non-secret http headers.
 - Every external tool call now flows through code we own.
 
 ### DP2 — `@openharness/policy`: policy engine, enforced via Pi hooks
@@ -83,6 +90,30 @@ Bring MCP to the harness (Pi has none), already the enforcement seam.
 - **D12** — v1 targets **technical employees** (Pi is a coding agent — bash/repo model).
   Non-technical desktop UX (support/ops, no-terminal ask-flow) is a later epic; but design
   `policy.json`'s `ask` semantics now so the GUI ask-dialog is a renderer, not a redesign.
+
+## Format gaps surfaced by realistic harnesses
+
+Building the checked-in `acme-fintech` / `northwind-ops` definitions exposed three
+gaps in the harness/policy format:
+
+1. **MCP secret indirection — CLOSED.** `acme-fintech`'s `analytics_readonly` server
+   originally embedded a bare Postgres connection string in `args`. An MCP server's
+   real secret must never sit in `harness.json` / the signed `.ohbundle` (they are
+   base64-embedded and distributed). Closed via `mcp.servers.<name>.secrets`
+   (ENV/HEADER name -> credential ref), resolved at connect-time from the local
+   `SecretStore`, fail-closed, threaded `createLiveSession → loadMcpTools →
+   connectMcpServer`. Only the ref name ships — the same posture as providers'
+   `credentialProfile`.
+2. **Arg-level policy matching beyond bash — OPEN (remaining roadmap item).**
+   Parameterized argument matching (`bash(git *)`) is implemented only for `bash`;
+   `parsePolicy` rejects a parameterized rule on any other tool (e.g.
+   `mcp__db__query(*DROP*)`) at load time so it can't silently become a security
+   no-op. Extending arg-level matching to MCP tool arguments is the outstanding
+   format work — deliberately not attempted here.
+3. **HTTP transport auth — CLOSED.** The streamable-HTTP transport had no way to
+   authenticate. Closed via literal `mcp.servers.<name>.headers` plus folding
+   `secrets` into http (HEADER name -> credential ref); both are set on the SDK
+   `StreamableHTTPClientTransport`'s `requestInit.headers` at connect.
 
 ## Non-goals (tonight)
 SSO, remote MCP gateway, audit dashboard, curated prompt library, signed *builds* (vs signed

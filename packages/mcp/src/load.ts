@@ -3,13 +3,20 @@ import type { HarnessDefinition } from "@openharness/definition";
 import { mcpToolToPiTool } from "./bridge.ts";
 import { connectMcpServer } from "./connect.ts";
 import { McpConnectionError } from "./errors.ts";
-import type { ConnectFn, McpConnection } from "./types.ts";
+import type { ConnectFn, McpConnection, SecretResolver } from "./types.ts";
 
 export interface LoadMcpToolsOptions {
   /** Override the connection factory (tests inject an in-memory connection). */
   connect?: ConnectFn;
   /** Where non-fatal warnings go. Default: console.warn. */
   logger?: (message: string) => void;
+  /**
+   * Resolves a server's `secrets` refs (env-var/header name -> credential ref)
+   * to values at connect time, from the machine-local store. Forwarded to
+   * `connect`; a spec that declares `secrets` with no resolver (or an
+   * unresolvable ref) fails the connection (fail-closed).
+   */
+  resolveSecret?: SecretResolver;
 }
 
 export interface LoadMcpToolsResult {
@@ -51,7 +58,7 @@ export async function loadMcpTools(
   for (const [serverName, spec] of Object.entries(servers)) {
     let conn: McpConnection;
     try {
-      conn = await connect(serverName, spec);
+      conn = await connect(serverName, spec, options.resolveSecret);
     } catch (err) {
       const message = `MCP server '${serverName}' failed to connect: ${errText(err)}`;
       if (spec.mandatory) {
