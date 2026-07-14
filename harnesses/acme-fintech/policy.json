@@ -1,0 +1,24 @@
+{
+  "default": "deny",
+  "rules": [
+    {
+      "match": "mcp__*__delete_*",
+      "action": "deny",
+      "reason": "Destructive MCP operations are never permitted, regardless of server."
+    },
+    {
+      "match": "mcp__*__drop_*",
+      "action": "deny",
+      "reason": "Destructive MCP operations are never permitted, regardless of server."
+    },
+    { "match": "read", "action": "allow" },
+    { "match": "bash(git *)", "action": "allow", "reason": "Read/write git operations are routine for platform engineering." },
+    { "match": "mcp__internal_docs__*", "action": "allow", "reason": "Internal docs server is read-only reference material." },
+    { "match": "mcp__analytics_readonly__*", "action": "allow", "reason": "Analytics server is read-only by design." }
+  ],
+  "models": { "allow": ["anthropic/claude-*"] },
+  "redact": [
+    { "pattern": "AKIA[0-9A-Z]{16}", "replace": "AKIA****REDACTED" },
+    { "pattern": "Bearer [A-Za-z0-9._-]+", "replace": "Bearer REDACTED" }
+  ]
+}
