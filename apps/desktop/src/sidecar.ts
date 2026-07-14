@@ -293,7 +293,13 @@ export async function startSidecar(opts: StartSidecarOptions): Promise<SidecarHa
               },
               profile,
             );
-            send(socket, isReady() ? { type: "ready" } : needsSetup("could not resolve the key"));
+            if (isReady()) {
+              // Broadcast: any other client that connected while unconfigured is
+              // also waiting on the onboarding panel — release them all.
+              for (const client of server.clients) send(client, { type: "ready" });
+            } else {
+              send(socket, needsSetup("could not resolve the key"));
+            }
           })
           .catch(() => send(socket, needsSetup("failed to save the key")));
         return;

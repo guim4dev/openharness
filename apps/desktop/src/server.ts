@@ -82,11 +82,12 @@ async function main(): Promise<void> {
     profile = process.env.OH_PROFILE ?? def.manifest.providers.default.credentialProfile;
   }
 
-  const { manager, registry } = await loadAccounts({ profileName: profile });
+  const { manager, registry, secretStore } = await loadAccounts({ profileName: profile });
 
   const opts: StartSidecarOptions = {
     manager,
     registry,
+    secretStore, // REQUIRED for in-app onboarding: set_credential writes the key here.
     profile,
     ...(verified ? { verified } : { harnessPath: harnessPath as string }),
     ...(process.env.OH_CWD ? { cwd: process.env.OH_CWD } : {}),

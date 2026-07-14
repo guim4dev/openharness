@@ -129,6 +129,42 @@ function readData(data: unknown): string {
 
 interface Frame {
   type: string;
+  error?: string;
+}
+
+/**
+ * Connect, and on the first `needs_setup` submit `secret`; resolve with every
+ * frame seen once `ready` arrives (or after `windowMs` if it never does). Proves
+ * the REAL server.ts wiring end to end — including that it threads the
+ * `secretStore` from `loadAccounts` into the sidecar (without it, set_credential
+ * can never resolve to `ready`).
+ */
+function driveOnboardingViaServer(url: string, secret: string, windowMs: number): Promise<Frame[]> {
+  return new Promise((resolvePromise, reject) => {
+    const frames: Frame[] = [];
+    const socket = new WebSocket(url);
+    let sent = false;
+    const done = setTimeout(() => {
+      socket.close();
+      resolvePromise(frames);
+    }, windowMs);
+    socket.onmessage = (event) => {
+      const frame = JSON.parse(readData(event.data)) as Frame;
+      frames.push(frame);
+      if (frame.type === "needs_setup" && !sent) {
+        sent = true;
+        socket.send(JSON.stringify({ type: "set_credential", secret }));
+      } else if (frame.type === "ready") {
+        clearTimeout(done);
+        socket.close();
+        resolvePromise(frames);
+      }
+    };
+    socket.onerror = () => {
+      clearTimeout(done);
+      reject(new Error("websocket error during onboarding"));
+    };
+  });
 }
 
 /** Connect, send a prompt, collect every frame for `windowMs`, then resolve. */
@@ -189,6 +225,33 @@ test(
       // No API key is configured, so the turn itself may error out — the point
       // here is only that verification passed (no integrity refusal).
       expect(frames.some((f) => f.type === "integrity_error")).toBe(false);
+    } finally {
+      kill();
+    }
+  },
+  210_000,
+);
+
+test(
+  "onboarding works through the REAL server.ts: no key -> needs_setup -> set_credential -> ready",
+  async () => {
+    // Dev boot with no env keys: loadAccounts resolves no account, so the sidecar
+    // announces onboarding. This spawns the actual server.ts the Tauri shell runs,
+    // so it regresses the wiring bug where server.ts dropped loadAccounts's
+    // secretStore (set_credential would then never resolve to ready).
+    const { handshake, kill } = await bootServerTs({ OH_HARNESS_PATH: exampleHarness });
+    try {
+      const url = `ws://127.0.0.1:${handshake.port}?token=${encodeURIComponent(handshake.token)}`;
+      const frames = await driveOnboardingViaServer(url, "sk-user-pasted-key", 15_000);
+
+      // Reached ready: the key was written to the (wired) local store and an
+      // account resolved — not the "no local store is configured" dead end.
+      expect(frames.some((f) => f.type === "ready")).toBe(true);
+      const setupErrors = frames
+        .filter((f) => f.type === "needs_setup")
+        .map((f) => f.error)
+        .filter(Boolean);
+      expect(setupErrors).not.toContain("no local store is configured");
     } finally {
       kill();
     }
