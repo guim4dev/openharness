@@ -7,7 +7,7 @@ All notable changes to OpenHarness. This project adheres to
 ## [Unreleased] — 2026-07-14 (initial build)
 
 The first end-to-end build: a company can define its own harness and ship it,
-governed and signed, to a TUI and a desktop app. 245 tests, MIT, built on
+governed and signed, to a TUI and a desktop app. 254 tests, MIT, built on
 [Pi](https://pi.dev).
 
 ### Added
@@ -37,6 +37,13 @@ governed and signed, to a TUI and a desktop app. 245 tests, MIT, built on
   definition** and shows an integrity-refusal screen on tamper or rollback.
 - **Policy `ask` UX** in both frontends — a branded approve/deny prompt (TUI dialog;
   desktop modal over the WS), fail-closed.
+- **Desktop first-run onboarding (v1.1)** — when no credential resolves for the
+  harness's provider, the sidecar emits a recoverable `needs_setup` frame and the
+  app shows a paste-a-key panel instead of a cryptic error. The key travels only
+  over the loopback, token-gated sidecar socket and is written to the machine-local
+  encrypted store (`CredentialManager.addAccount`); `set_credential` → `ready`
+  enables chat with no restart. Fail-closed on a blank key; never logged, never
+  leaves the machine.
 - **Example harnesses** — `acme-fintech` (deny-by-default, AWS-key redaction),
   `northwind-ops` (ask-on-writes, PII redaction), and `meridian-support` (the
   non-technical desktop operator: `bash` denied, ask-on-every-write, heavy PII

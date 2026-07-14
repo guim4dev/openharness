@@ -54,8 +54,11 @@ everyone else. Before we lean on that claim we should exercise it.
   denies, a missing branding icon, an MCP secret in the reserved `api-key:*`
   namespace, a default-deny with no allow rule, and a mandatory MCP server whose
   every tool is denied.
-- First-run desktop onboarding: pick a harness, drop in a key, first turn —
-  without touching a terminal.
+- **✓ Shipped** — first-run desktop onboarding: when no credential resolves, the
+  sidecar emits a recoverable `needs_setup` and the app shows a paste-a-key panel
+  (written to the machine-local encrypted store over the loopback sidecar, never
+  leaving the machine); `set_credential` → `ready` enables chat with no restart.
+  Fail-closed on a blank key. Provider OAuth subscriptions remain a follow-up.
 
 ## v2 — the remote MCP gateway (the moat)
 
