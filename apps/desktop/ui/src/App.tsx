@@ -6,6 +6,7 @@ import {
   type PendingAsk,
   type SetupState,
 } from "./chat.ts";
+import { BuilderPanel } from "./BuilderPanel.tsx";
 
 /** Human-friendly provider name for the onboarding copy. */
 function providerLabel(provider: string): string {
@@ -270,6 +271,7 @@ export function App() {
   const { messages, status, connected, send, integrityMessage, pendingAsk, answerAsk, setup, submitCredential } =
     useChat(connection);
   const [draft, setDraft] = useState("");
+  const [view, setView] = useState<"chat" | "builder">("chat");
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -285,6 +287,11 @@ export function App() {
   // First-run onboarding: no credential yet — show the key panel, not the chat.
   if (status === "needs_setup" && setup) {
     return <SetupPanel setup={setup} connected={connected} onSubmit={submitCredential} />;
+  }
+
+  // Authoring mode: the visual harness builder takes over the window.
+  if (view === "builder") {
+    return <BuilderPanel onClose={() => setView("chat")} />;
   }
 
   const streaming = status === "streaming";
@@ -307,9 +314,14 @@ export function App() {
     <div className="app">
       <header className="header">
         <div className="brand">OpenHarness</div>
-        <div className={`status status-${connected ? "on" : "off"}`}>
-          <span className="dot" />
-          {statusLabel(connection, connected, streaming)}
+        <div className="header-right">
+          <button type="button" className="header-build" onClick={() => setView("builder")}>
+            Build a harness
+          </button>
+          <div className={`status status-${connected ? "on" : "off"}`}>
+            <span className="dot" />
+            {statusLabel(connection, connected, streaming)}
+          </div>
         </div>
       </header>
 

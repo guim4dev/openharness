@@ -8,9 +8,9 @@ const workerCap = Math.max(2, Math.floor(cpus().length / 2));
 export default defineConfig({
   test: {
     include: [
-      "packages/*/src/**/*.test.ts",
-      "apps/*/src/**/*.test.ts",
-      "apps/*/ui/src/**/*.test.ts",
+      "packages/*/src/**/*.test.{ts,tsx}",
+      "apps/*/src/**/*.test.{ts,tsx}",
+      "apps/*/ui/src/**/*.test.{ts,tsx}",
     ],
     environment: "node",
     // Several suites spawn real child processes (server.ts via node+tsx, stdio
