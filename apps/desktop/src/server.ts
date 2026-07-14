@@ -41,6 +41,17 @@ async function main(): Promise<void> {
   const verified = bundlePath && pubkeyPath ? { bundlePath, pubkeyPath } : undefined;
   const harnessPath = process.env.OH_HARNESS_PATH ?? process.argv[2];
 
+  // A half-configured verified boot must FAIL LOUD — never silently fall back to
+  // an unverified dev boot (this is a trust product). If exactly one of the two
+  // verified-path env vars is set, refuse rather than boot unverified.
+  if (Boolean(bundlePath) !== Boolean(pubkeyPath)) {
+    console.error(
+      "Incomplete verified-boot config: set BOTH OH_BUNDLE_PATH and OH_ORG_PUBKEY_PATH " +
+        "(refusing to fall back to an unverified boot).",
+    );
+    process.exit(2);
+  }
+
   if (!verified && !harnessPath) {
     console.error(
       "No boot source configured. Set OH_BUNDLE_PATH + OH_ORG_PUBKEY_PATH for a verified boot, " +
