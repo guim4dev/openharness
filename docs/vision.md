@@ -10,7 +10,7 @@ Last updated: 2026-07-14 (after an autonomous build night).
 
 ## 0. Current state (what's actually built)
 
-On `main`, **376 tests green**, typecheck + `cargo check` green. A cross-cutting
+On `main`, **382 tests green**, typecheck + `cargo check` green. A cross-cutting
 integration test proves MCP + policy + audit compose end-to-end in one live
 session, and adversarial review passes hardened the security claims (honest
 audit-integrity framing + server-side chain verification, policy fails loud on a
@@ -22,9 +22,13 @@ HTTP entry contains per-request failures instead of crashing the shared server.
 Packages/apps:
 
 - **`@openharness/definition`** — HarnessDefinition (dir + `harness.json` + optional
-  `policy.json` + `mcp` section), zod-validated, fail-fast loader. `systemPrompt`/
-  `appendSystemPrompt` accept a plain file path (default) or a `lib:<name>` ref
-  resolved against an optional `promptLibrary` dir — see `@openharness/prompts`.
+  `policy.json` + `mcp` + `gateway` sections), zod-validated, fail-fast loader.
+  `systemPrompt`/`appendSystemPrompt` accept a plain file path (default) or a
+  `lib:<name>` ref resolved against an optional `promptLibrary` dir — see
+  `@openharness/prompts`. `scaffoldHarness` writes a starter; `writeHarnessDefinition`
+  materializes a COMPLETE definition from in-memory objects (schema-validated,
+  fail-closed) — the "ship" primitive behind the visual builder and the headless
+  `openharness materialize` command.
 - **`@openharness/prompts`** — a curated PromptLibrary: a dir of `.md` files with
   YAML frontmatter `{ name, description }`; `loadPromptLibrary` + `resolvePrompt`
   (throws, listing available names, on an unknown ref).

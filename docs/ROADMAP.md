@@ -141,8 +141,10 @@ questions a human must answer first) is in
   Started: a `BuilderPanel` (reachable from the desktop chat header) with a pure,
   tested model — fill branding/prompt/provider, policy rules, skills, and MCP
   servers, and watch the live `harness.json`/`policy.json` render with
-  field-level validation. Remaining: save-to-disk via the sidecar (needs a Tauri
-  file dialog).
+  field-level validation. The "ship" primitive is built + tested
+  (`writeHarnessDefinition` materializes a complete definition from the builder's
+  objects; `openharness materialize <spec> <dir>` is the headless path). Remaining:
+  wire the desktop save button to it via the sidecar (needs a Tauri file dialog).
 - **Managed cloud** — a hosted gateway + bundle host + audit sink for orgs that
   don't want to run infra, with the self-hosted path always a first-class equal.
 

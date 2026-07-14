@@ -7,7 +7,7 @@ All notable changes to OpenHarness. This project adheres to
 ## [Unreleased] — 2026-07-14 (initial build)
 
 The first end-to-end build: a company can define its own harness and ship it,
-governed and signed, to a TUI and a desktop app. 376 tests, MIT, built on
+governed and signed, to a TUI and a desktop app. 382 tests, MIT, built on
 [Pi](https://pi.dev).
 
 ### Added
