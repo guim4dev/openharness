@@ -11,9 +11,13 @@ It is built as a surgical fork of [`earendil-works/pi`](https://pi.dev) (MIT), a
 minimal TypeScript agent harness, and adds the layer Pi intentionally leaves out:
 **governance without losing control** — self-hosted, local-first, provider-agnostic.
 
-> Status: early, but a walking skeleton runs — you can chat with a harness
-> today by bringing your own API key (see below). See [`docs/vision.md`](docs/vision.md)
-> for the full thinking and [`docs/specs/`](docs/specs) for per-slice designs.
+> Status: the walking skeleton runs (chat with a harness today with your own API
+> key — see below), the governance data plane is built (MCP bridge, deny-by-default
+> policy + secret redaction, hash-chained audit, ed25519-signed definition bundles,
+> a thin bundle/audit server), and `openharness build` produces a branded, signed,
+> ready-to-package desktop app. See [`docs/DEMO.md`](docs/DEMO.md) for the 90-second
+> story, [`docs/vision.md`](docs/vision.md) for the full thinking, and
+> [`docs/specs/`](docs/specs) for per-slice designs.
 
 ## Try it in 60 seconds
 
@@ -59,6 +63,20 @@ Rust toolchain):
 ```bash
 npm run dev:desktop
 ```
+
+## Build a branded app
+
+Turn a harness definition into a company-branded, signed desktop app — the app
+boots pinned to the signed definition and refuses to run a tampered one:
+
+```bash
+npm run chat -- keygen --out org                        # the org's signing key (once)
+npm run chat -- build harnesses/example --key org.key --out dist/acme --org acme --name assistant
+cd dist/acme && npx tauri build                         # -> a branded installer
+```
+
+The full, runnable story (including the flip-one-byte-→-refusal beat) is in
+[`docs/DEMO.md`](docs/DEMO.md).
 
 ## Why
 
