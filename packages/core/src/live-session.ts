@@ -15,6 +15,7 @@ import type { HarnessDefinition } from "@openharness/definition";
 import { loadVerifiedDefinition } from "@openharness/bundle";
 import type { AuthProviderRegistry, CredentialManager } from "@openharness/credentials";
 import { loadMcpTools } from "@openharness/mcp";
+import type { ConnectFn } from "@openharness/mcp";
 import { checkModel } from "@openharness/policy";
 import type { Policy } from "@openharness/policy";
 import { createFileAuditLog } from "@openharness/audit";
@@ -70,6 +71,14 @@ export interface CreateLiveSessionOptions {
    * tools (e.g. a stub tool an integration test drives). Merged with MCP tools.
    */
   customTools?: ToolDefinition[];
+  /**
+   * Advanced/test seam: override the MCP connection factory used to reach the
+   * harness's declared servers. Forwarded verbatim to `loadMcpTools`, so a
+   * bridged tool still enters the session as `mcp__<server>__<tool>` and flows
+   * through the SAME policy/audit path as production. An integration test injects
+   * an in-memory server here; when omitted, the real stdio/http connector is used.
+   */
+  mcpConnect?: ConnectFn;
   /**
    * Where to write the hash-chained audit log. Auditing is OFF unless BOTH a
    * policy is in effect AND this path is set (opt-in), so existing hermetic
@@ -199,7 +208,10 @@ export async function createLiveSession(opts: CreateLiveSessionOptions): Promise
   // Connect MCP servers declared on the harness and bridge their tools into Pi.
   // A mandatory server that fails to connect throws here (fail fast). No `mcp`
   // section => empty tools + no-op dispose, so hermetic harnesses are unaffected.
-  const { tools: mcpTools, dispose: disposeMcp } = await loadMcpTools(def);
+  const { tools: mcpTools, dispose: disposeMcp } = await loadMcpTools(
+    def,
+    opts.mcpConnect ? { connect: opts.mcpConnect } : {},
+  );
   const allTools: ToolDefinition[] = [...mcpTools, ...(opts.customTools ?? [])];
 
   const { session } = await createAgentSessionFromServices({
