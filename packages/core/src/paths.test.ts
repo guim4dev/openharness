@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, isAbsolute, sep } from "node:path";
@@ -6,6 +7,16 @@ import { configDir } from "./paths.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..", "..");
+
+/**
+ * Recomputes the disambiguation suffix `configDir` appends to the sanitized
+ * segment whenever a real (non-fallback) explicit app id is provided:
+ * `sha256(rawId).slice(0, 10)`. Mirrors `paths.ts` exactly so these tests
+ * assert the real scheme rather than a loose shape.
+ */
+function hashSuffix(rawId: string): string {
+  return createHash("sha256").update(rawId, "utf8").digest("hex").slice(0, 10);
+}
 
 // configDir() reads OPENHARNESS_APP_ID / OPENHARNESS_DIR from the environment
 // when no explicit appId is passed. Stash + restore both around every test in
@@ -34,24 +45,31 @@ test("different explicit app ids resolve to different, correctly-suffixed dirs",
   expect(acme).not.toBe(globex);
   expect(isAbsolute(acme)).toBe(true);
   expect(isAbsolute(globex)).toBe(true);
-  expect(acme.endsWith("ai.openharness.acme.assistant")).toBe(true);
-  expect(globex.endsWith("ai.openharness.globex.helper")).toBe(true);
+  expect(acme.endsWith(`ai.openharness.acme.assistant-${hashSuffix("ai.openharness.acme.assistant")}`)).toBe(
+    true,
+  );
+  expect(globex.endsWith(`ai.openharness.globex.helper-${hashSuffix("ai.openharness.globex.helper")}`)).toBe(
+    true,
+  );
 });
 
-test("configDir() with OPENHARNESS_APP_ID unset preserves the default", () => {
+test("configDir() with OPENHARNESS_APP_ID unset preserves the default (no hash suffix)", () => {
   expect(isAbsolute(configDir())).toBe(true);
   expect(configDir().endsWith("openharness")).toBe(true);
+  expect(configDir().endsWith(sep + "openharness")).toBe(true);
 });
 
 test("configDir() picks up OPENHARNESS_APP_ID from the environment when no arg is passed", () => {
   process.env.OPENHARNESS_APP_ID = "ai.openharness.acme.assistant";
-  expect(configDir().endsWith("ai.openharness.acme.assistant")).toBe(true);
+  expect(configDir().endsWith(`ai.openharness.acme.assistant-${hashSuffix("ai.openharness.acme.assistant")}`)).toBe(
+    true,
+  );
   expect(configDir()).toBe(configDir("ai.openharness.acme.assistant"));
 });
 
 test("an explicit appId argument overrides OPENHARNESS_APP_ID", () => {
   process.env.OPENHARNESS_APP_ID = "should-be-ignored";
-  expect(configDir("explicit-wins").endsWith("explicit-wins")).toBe(true);
+  expect(configDir("explicit-wins").endsWith(`explicit-wins-${hashSuffix("explicit-wins")}`)).toBe(true);
 });
 
 test("path traversal attempt sanitizes to a single safe segment, no separators", () => {
@@ -65,15 +83,40 @@ test("path traversal attempt sanitizes to a single safe segment, no separators",
   expect(segment).not.toBe(".");
 });
 
-test("space and slash id sanitizes to a single safe segment", () => {
+test("space and slash id sanitizes to a single safe segment plus hash suffix", () => {
   const dir = configDir("A B/C");
   const segment = dir.slice(dir.lastIndexOf(sep) + 1);
-  expect(segment).toBe("a-b-c");
+  expect(segment).toBe(`a-b-c-${hashSuffix("A B/C")}`);
 });
 
-test("an id that is only dots falls back to the default app id", () => {
+test("an id that is only dots falls back to the default app id (no hash suffix)", () => {
   expect(configDir("..").endsWith("openharness")).toBe(true);
   expect(configDir(".").endsWith("openharness")).toBe(true);
+  expect(configDir("..").endsWith(sep + "openharness")).toBe(true);
+  expect(configDir(".").endsWith(sep + "openharness")).toBe(true);
+});
+
+test("ids that sanitize to the same segment via different punctuation still resolve to different dirs", () => {
+  // Both collapse to the sanitized segment "app-id" under sanitizeAppId, but
+  // are distinct raw ids and must not share a directory.
+  expect(configDir("app!id")).not.toBe(configDir("app@id"));
+});
+
+test("ids differing only by case still resolve to different dirs", () => {
+  expect(configDir("ACME")).not.toBe(configDir("acme"));
+});
+
+test("ids agreeing on their first MAX_APP_ID_LENGTH chars still resolve to different dirs", () => {
+  const a = configDir(`${"x".repeat(200)}-tenant-A`);
+  const b = configDir(`${"x".repeat(200)}-tenant-B`);
+  expect(a).not.toBe(b);
+});
+
+test("a Windows-reserved device name does not yield a bare reserved segment", () => {
+  const dir = configDir("CON");
+  const segment = dir.slice(dir.lastIndexOf(sep) + 1);
+  expect(segment.toLowerCase()).not.toBe("con");
+  expect(segment.toLowerCase().startsWith("app-con-")).toBe(true);
 });
 
 test("desktop app's Tauri CSP is a real, non-null policy", () => {
