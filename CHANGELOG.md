@@ -7,7 +7,7 @@ All notable changes to OpenHarness. This project adheres to
 ## [Unreleased] — 2026-07-14 (initial build)
 
 The first end-to-end build: a company can define its own harness and ship it,
-governed and signed, to a TUI and a desktop app. 254 tests, MIT, built on
+governed and signed, to a TUI and a desktop app. 329 tests, MIT, built on
 [Pi](https://pi.dev).
 
 ### Added
@@ -47,8 +47,8 @@ governed and signed, to a TUI and a desktop app. 254 tests, MIT, built on
   entry (`persistOnboardedAccount`) references the stored secret, which
   `loadAccounts` resolves on the next launch — so `accounts.json` never holds
   raw key material.
-- **v2 remote MCP gateway — CORE** (`@openharness/gateway`, 50 tests) — the
-  governed pipeline as an MCP server a harness connects to: a pinned virtual
+- **v2 remote MCP gateway — end to end** (`@openharness/gateway` + core bridge) —
+  the governed pipeline as an MCP server a harness connects to: a pinned virtual
   tool catalog (never proxied live), DPoP-bound gateway tokens, the SAME policy
   engine evaluated server-side (per-principal + argument-level), a KMS-interface
   credential broker resolved only after the allow decision (the gateway holds
@@ -56,10 +56,16 @@ governed and signed, to a TUI and a desktop app. 254 tests, MIT, built on
   runtime with a per-connector egress allowlist + a forward-proxy tap (the
   Postmark defense) + one first-party GitHub-read connector, return-path
   redaction, an authoritative hash-chained audit, a fail-closed server-side
-  approval queue, and per-user upstream session isolation. Connector/broker sit
-  behind swappable interfaces (an OpenConnector backend can slot in later). The
-  harness↔gateway HTTP+DPoP transport wiring + offline branch + deploy hardening
-  remain.
+  approval queue, and per-user upstream session isolation. The **transport**
+  closes the loop: a definition declares a `gateway` (url + pinned pubkey +
+  tools); `startGatewayHttp` is a deployable HTTP entry that authenticates every
+  request at the edge with DPoP (token + request-bound proof + key-binding, no
+  passthrough, no session affinity); and `createLiveSession` bridges the gateway's
+  pinned tools into the agent as `mcp__<gateway>__<tool>`, fail-closed at boot
+  when a declared gateway is unreachable. Proven over real loopback HTTP.
+  Connector/broker sit behind swappable interfaces (an OpenConnector backend can
+  slot in later). Deploy hardening (real IdP/token-exchange, KMS-backed broker,
+  containerized connector sandbox) remains.
 - **Example harnesses** — `acme-fintech` (deny-by-default, AWS-key redaction),
   `northwind-ops` (ask-on-writes, PII redaction), and `meridian-support` (the
   non-technical desktop operator: `bash` denied, ask-on-every-write, heavy PII

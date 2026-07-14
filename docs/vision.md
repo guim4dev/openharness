@@ -10,7 +10,7 @@ Last updated: 2026-07-14 (after an autonomous build night).
 
 ## 0. Current state (what's actually built)
 
-On `main`, **312 tests green**, typecheck + `cargo check` green. A cross-cutting
+On `main`, **329 tests green**, typecheck + `cargo check` green. A cross-cutting
 integration test proves MCP + policy + audit compose end-to-end in one live
 session, and an adversarial review pass hardened the security claims (honest
 audit-integrity framing + server-side chain verification, policy fails loud on a
@@ -55,15 +55,23 @@ data plane (5) + moat build pipeline (M1–M3), plus `openharness init`/`doctor`
 (scaffold + preflight, doctor also gating `build` and CI), a third example harness
 (`meridian-support`, the non-technical desktop operator), **v1.1 first-run desktop
 onboarding** (in-app BYO-key: a recoverable `needs_setup` → paste-a-key written to
-the local encrypted store → `ready`, no restart), and the **v2 remote MCP gateway
-CORE** (`@openharness/gateway`, 50 tests: the governed pipeline as an MCP server —
-pinned catalog, DPoP tokens, server-side PDP, post-decision credential broker,
-sandboxed connector runtime + egress/tap + a GitHub-read connector, return-path
-redaction, authoritative audit, fail-closed approval, per-user isolation).
-**Deferred:** the gateway's harness↔gateway HTTP+DPoP transport wiring + offline
-branch + deploy hardening (the core is built; this is the connection plumbing);
-final `tauri build` + fresh-account validation (manual); OS code-signing; a
-builder UI; cloud. (OpenConnector §13 may back the connector layer once mature.)
+the local encrypted store → `ready`, no restart), and the **v2 remote MCP gateway**
+(`@openharness/gateway`, now end to end). The CORE is the governed pipeline as an
+MCP server — pinned catalog, DPoP tokens, server-side PDP, post-decision credential
+broker, sandboxed connector runtime + egress/tap + a GitHub-read connector,
+return-path redaction, authoritative audit, fail-closed approval, per-user
+isolation. The **TRANSPORT** now closes the loop: a definition declares a `gateway`
+(url + pinned pubkey + tools); a deployable HTTP entry (`startGatewayHttp`)
+authenticates every request at the edge with DPoP (token + request-bound proof +
+key-binding, no token passthrough, no session affinity); and core bridges the
+gateway's pinned tools into the live session as `mcp__<gateway>__<tool>`,
+fail-closed at boot when the declared gateway is unreachable. Proven over real
+loopback HTTP: an allowed call runs through the full pipeline (audited), a client
+without DPoP is refused at the edge, a denied tool never reaches the upstream.
+**Deferred:** gateway deploy hardening (real IdP/token-exchange flow, KMS-backed
+broker, containerized connector sandbox); final `tauri build` + fresh-account
+validation (manual); OS code-signing; a builder UI; cloud. (OpenConnector §13 may
+back the connector layer once mature.)
 
 ---
 
