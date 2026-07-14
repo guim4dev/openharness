@@ -43,7 +43,7 @@ export async function runChat(opts: RunChatOptions): Promise<RunChatResult> {
   const provider = def.manifest.providers.default;
   const profile = provider.credentialProfile;
 
-  const { manager, registry } = await loadAccounts({ profileName: profile, dir, env });
+  const { manager, registry, secretStore } = await loadAccounts({ profileName: profile, dir, env });
 
   if (!manager.activeAccount(profile)) {
     err(
@@ -61,6 +61,7 @@ export async function runChat(opts: RunChatOptions): Promise<RunChatResult> {
     harnessPath: opts.harnessPath,
     manager,
     registry,
+    secretStore,
     profile,
     ...(opts.cwd ? { cwd: opts.cwd } : {}),
     ...(opts.agentDir ? { agentDir: opts.agentDir } : {}),

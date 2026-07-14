@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import { loadHarnessDefinition } from "@openharness/definition";
 import type { HarnessDefinition } from "@openharness/definition";
 import { loadVerifiedDefinition } from "@openharness/bundle";
-import type { AuthProviderRegistry, CredentialManager } from "@openharness/credentials";
+import type { AuthProviderRegistry, CredentialManager, SecretStore } from "@openharness/credentials";
 import { loadMcpTools } from "@openharness/mcp";
 import type { ConnectFn } from "@openharness/mcp";
 import { checkModel } from "@openharness/policy";
@@ -55,6 +55,14 @@ export interface CreateLiveSessionOptions {
   registry: AuthProviderRegistry;
   /** Credential profile to drive rotation against. */
   profile: string;
+  /**
+   * Machine-local secret store used to resolve MCP servers' `secrets` refs
+   * (env-var/header name -> credential ref) at connect time. When omitted, a
+   * harness that declares `secrets` on any MCP server fails to connect that
+   * server (fail-closed) — a blank secret is never used. Harnesses without MCP
+   * `secrets` are unaffected.
+   */
+  secretStore?: SecretStore;
   /**
    * Advanced/test seam: build the Pi ModelRegistry bound to the session's real
    * AuthStorage (e.g. one carrying a stub provider). When omitted, Pi's default
@@ -217,10 +225,13 @@ export async function createLiveSession(opts: CreateLiveSessionOptions): Promise
   // Connect MCP servers declared on the harness and bridge their tools into Pi.
   // A mandatory server that fails to connect throws here (fail fast). No `mcp`
   // section => empty tools + no-op dispose, so hermetic harnesses are unaffected.
-  const { tools: mcpTools, dispose: disposeMcp } = await loadMcpTools(
-    def,
-    opts.mcpConnect ? { connect: opts.mcpConnect } : {},
-  );
+  const { tools: mcpTools, dispose: disposeMcp } = await loadMcpTools(def, {
+    ...(opts.mcpConnect ? { connect: opts.mcpConnect } : {}),
+    // Resolve MCP `secrets` refs from the machine-local store at connect time.
+    // The ref (a name) is all that shipped in the bundle; the value is fetched
+    // here and never persisted back into the definition.
+    ...(opts.secretStore ? { resolveSecret: (ref: string) => opts.secretStore!.get(ref) } : {}),
+  });
   const allTools: ToolDefinition[] = [...mcpTools, ...(opts.customTools ?? [])];
 
   const { session } = await createAgentSessionFromServices({

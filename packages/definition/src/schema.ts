@@ -14,6 +14,9 @@ const mcpServerSpec = z
     args: z.array(z.string()).optional(),
     env: z.record(z.string()).optional(),
     url: z.string().min(1).optional(),
+    headers: z.record(z.string()).optional(),
+    // ENV VAR name (stdio) or HEADER name (http) -> credential REF name (never a value).
+    secrets: z.record(z.string()).optional(),
     mandatory: z.boolean().optional(),
     tools: z.array(z.string()).optional(),
   })

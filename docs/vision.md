@@ -231,6 +231,26 @@ enforcement server, SSO, approved-build distribution, packaging pipeline, cloud.
 - Consumer-subscription OAuth ToS per provider (ChatGPT resolved in D8; Claude
   Max / others to assess as they're added).
 
+### Format gaps surfaced by realistic harnesses
+
+Building the checked-in `acme-fintech` / `northwind-ops` definitions surfaced
+three gaps in the harness/policy format. Tracked here as the roadmap item; see
+the governance spec for detail.
+
+1. **MCP secret indirection — CLOSED.** An MCP server's real secret (DB password,
+   API token) must never live in `harness.json` / the signed `.ohbundle`. Added
+   `mcp.servers.<name>.secrets` mapping an ENV VAR (stdio) or HEADER (http) name to
+   a credential **ref name** — resolved at connect-time from the machine-local
+   `SecretStore`, fail-closed. Only the ref travels, mirroring `credentialProfile`.
+2. **Arg-level policy matching beyond bash — OPEN (remaining roadmap item).**
+   Argument-level matching (`bash(git *)`) exists only for `bash`; `parsePolicy`
+   rejects a parameterized rule on any other tool (e.g. `mcp__db__query(*DROP*)`)
+   at load time rather than let it become a silent no-op. Matching on MCP tool
+   arguments is the outstanding format extension.
+3. **HTTP transport auth — CLOSED.** The http MCP transport had no auth field.
+   Added literal `mcp.servers.<name>.headers` plus folding `secrets` into http
+   (HEADER name -> credential ref), set on the client's request headers at connect.
+
 ## 10. Subscription-auth landscape (research, 2026-07-13)
 
 How existing tools authenticate to subscriptions — the input to the `AuthProvider`

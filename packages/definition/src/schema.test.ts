@@ -43,6 +43,34 @@ test("accepts an optional mcp section with stdio and http servers", () => {
   expect(parsed.mcp?.servers.remote.mandatory).toBe(true);
 });
 
+test("accepts `secrets` (env/header -> credential ref) and http `headers` maps", () => {
+  const withSecrets = {
+    ...valid,
+    mcp: {
+      servers: {
+        analytics: {
+          transport: "stdio",
+          command: "mcp-postgres",
+          args: ["postgresql://ro@db/analytics"],
+          // ENV VAR name -> credential REF name (never the value).
+          secrets: { PGPASSWORD: "acme-analytics-ro" },
+        },
+        remote: {
+          transport: "http",
+          url: "https://mcp.example.com",
+          headers: { "X-Static": "v" },
+          // HEADER name -> credential REF name (never the value).
+          secrets: { "X-Api-Key": "acme-http-token" },
+        },
+      },
+    },
+  };
+  const parsed = harnessManifestSchema.parse(withSecrets);
+  expect(parsed.mcp?.servers.analytics.secrets).toEqual({ PGPASSWORD: "acme-analytics-ro" });
+  expect(parsed.mcp?.servers.remote.headers).toEqual({ "X-Static": "v" });
+  expect(parsed.mcp?.servers.remote.secrets).toEqual({ "X-Api-Key": "acme-http-token" });
+});
+
 test("a manifest with no mcp section stays valid (backward compatible)", () => {
   const parsed = harnessManifestSchema.parse(valid);
   expect(parsed.mcp).toBeUndefined();

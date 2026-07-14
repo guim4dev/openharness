@@ -30,6 +30,13 @@ test("acme-fintech loads cleanly: branding, mandatory skill, two non-mandatory M
   expect(servers.analytics_readonly.mandatory).toBe(false);
   expect(servers.internal_docs.tools).toEqual(["read_file", "list_directory", "search_files"]);
   expect(servers.analytics_readonly.tools).toEqual(["query"]);
+
+  // The analytics server's DB password is provisioned locally and referenced by
+  // NAME via `secrets` (PGPASSWORD -> credential ref) — never a bare credential
+  // baked into args. That ref is all that ships in the bundle.
+  expect(servers.analytics_readonly.secrets).toEqual({ PGPASSWORD: "acme-analytics-ro" });
+  const argsJoined = (servers.analytics_readonly.args ?? []).join(" ");
+  expect(argsJoined).not.toMatch(/:[^@/]*@/); // no `user:password@host` credential in the connection string
 });
 
 test("acme-fintech's policy.json parses: deny-by-default, destructive-tool denies, model allow-list", async () => {

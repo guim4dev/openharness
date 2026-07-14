@@ -173,6 +173,37 @@ test("a non-mandatory server that cannot connect is logged and skipped, others s
   }
 });
 
+test("loadMcpTools threads a secret resolver to connect, resolving refs from the provided store", async () => {
+  const conn = await inMemoryConnection();
+  const store = new Map<string, string>([["acme-analytics-ro", "resolved-secret-value"]]);
+
+  // A ConnectFn that behaves like the real connector: it resolves each declared
+  // secret ref through the injected resolver before "opening" the transport.
+  let seen: Record<string, string> | undefined;
+  const connect: ConnectFn = async (_name, spec, resolveSecret) => {
+    seen = {};
+    for (const [envVar, ref] of Object.entries(spec.secrets ?? {})) {
+      const value = resolveSecret ? await resolveSecret(ref) : undefined;
+      if (value === undefined) throw new Error(`unresolved ref ${ref}`);
+      seen[envVar] = value;
+    }
+    return conn;
+  };
+
+  const { tools, dispose } = await loadMcpTools(
+    defWithMcp({ test: { transport: "stdio", command: "irrelevant", secrets: { PGPASSWORD: "acme-analytics-ro" } } }),
+    { connect, resolveSecret: (ref) => Promise.resolve(store.get(ref)) },
+  );
+
+  try {
+    expect(tools.map((t) => t.name)).toContain("mcp__test__echo");
+    // The ref resolved to the store's value and reached the connector as the env value.
+    expect(seen).toEqual({ PGPASSWORD: "resolved-secret-value" });
+  } finally {
+    await dispose();
+  }
+});
+
 test("no mcp section yields no tools and a no-op dispose (backward compatible)", async () => {
   const def: HarnessDefinition = {
     manifest: {
