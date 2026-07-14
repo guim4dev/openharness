@@ -8,7 +8,12 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 export type ServerMessage =
   | { type: "token"; text: string }
   | { type: "done" }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  /**
+   * Verify-on-boot refusal from the sidecar: the configuration could not be
+   * cryptographically verified. Locks the UI — no chat is possible this session.
+   */
+  | { type: "integrity_error"; message: string };
 
 export type ChatRole = "user" | "assistant";
 
@@ -22,13 +27,18 @@ export interface ChatMessage {
   error: boolean;
 }
 
-export type ChatStatus = "idle" | "streaming";
+export type ChatStatus = "idle" | "streaming" | "integrity_error";
 
 export interface ChatState {
   messages: ChatMessage[];
   status: ChatStatus;
   /** Monotonic counter used to mint stable message ids without side effects. */
   seq: number;
+  /**
+   * Set only in the terminal `integrity_error` status: the human-readable
+   * reason the configuration was refused. Drives the refusal screen.
+   */
+  integrityMessage?: string;
 }
 
 export type ChatAction =
@@ -124,6 +134,13 @@ function applyServerEvent(state: ChatState, event: ServerMessage): ChatState {
         ],
       };
     }
+
+    case "integrity_error": {
+      // Terminal: the definition failed verification on boot. Lock the whole UI
+      // into a dedicated refusal state — this overrides any in-flight stream and
+      // no further chat is possible for this session.
+      return { ...state, status: "integrity_error", integrityMessage: event.message };
+    }
   }
 }
 
@@ -162,6 +179,8 @@ export interface UseChat {
   connected: boolean;
   /** Send a prompt to the sidecar (no-op until connected). */
   send: (text: string) => void;
+  /** Set only in the `integrity_error` status: why the configuration was refused. */
+  integrityMessage?: string;
 }
 
 /**
@@ -205,5 +224,11 @@ export function useChat(connection: Connection | null): UseChat {
     socket.send(JSON.stringify({ type: "prompt", text }));
   }, []);
 
-  return { messages: state.messages, status: state.status, connected, send };
+  return {
+    messages: state.messages,
+    status: state.status,
+    connected,
+    send,
+    ...(state.integrityMessage !== undefined ? { integrityMessage: state.integrityMessage } : {}),
+  };
 }

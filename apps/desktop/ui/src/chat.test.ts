@@ -70,6 +70,26 @@ describe("chatReducer", () => {
     expect(state.messages[0].text).toBe("could not connect");
     expect(state.status).toBe("idle");
   });
+
+  test("an integrity_error moves state to the terminal refusal state", () => {
+    const state = feed(initialChatState, {
+      type: "integrity_error",
+      message: "signature verification failed",
+    });
+    expect(state.status).toBe("integrity_error");
+    expect(state.integrityMessage).toBe("signature verification failed");
+    // No chat bubbles: the refusal replaces the conversation entirely.
+    expect(state.messages).toHaveLength(0);
+  });
+
+  test("integrity_error overrides an in-flight stream", () => {
+    let state = feed(initialChatState, { type: "token", text: "partial answer" });
+    expect(state.status).toBe("streaming");
+
+    state = feed(state, { type: "integrity_error", message: "bundle tampered" });
+    expect(state.status).toBe("integrity_error");
+    expect(state.integrityMessage).toBe("bundle tampered");
+  });
 });
 
 /** Minimal synchronous WebSocket stand-in the hook drives during the test. */
