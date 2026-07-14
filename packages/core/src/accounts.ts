@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AuthProviderRegistry,
@@ -170,16 +170,37 @@ export async function loadAccounts(opts: LoadAccountsOptions = {}): Promise<Load
       ensureProfile(name, profile.policy);
       for (const acct of profile.accounts ?? []) {
         const key = acct.apiKey ?? (acct.apiKeyEnv ? env[acct.apiKeyEnv] : undefined);
-        if (!key || key.trim() === "") continue; // unresolved key -> skip account
-        await addAccount({
+        if (key && key.trim() !== "") {
+          await addAccount({
+            id: acct.id,
+            provider: acct.provider,
+            profile: name,
+            label: acct.label ?? `${acct.provider} (${acct.id})`,
+            apiKey: key,
+            ...(acct.baseUrl ? { baseUrl: acct.baseUrl } : {}),
+            ...(acct.authProviderId ? { authProviderId: acct.authProviderId } : {}),
+          });
+          continue;
+        }
+        // No inline/env key: a durable-onboarding entry — resolve from the store
+        // if the secret was already saved there (persistOnboardedAccount, written
+        // by in-app onboarding), otherwise skip as unresolved.
+        if (seenIds.has(acct.id)) continue;
+        const secretRef = `api-key:${acct.id}`;
+        const stored = await secretStore.get(secretRef);
+        if (!stored) continue;
+        seenIds.add(acct.id);
+        const credential: StoredCredential = { kind: "api_key", secretRef };
+        if (acct.baseUrl) credential.baseUrl = acct.baseUrl;
+        accounts.push({
           id: acct.id,
           provider: acct.provider,
-          profile: name,
+          authProviderId: acct.authProviderId ?? "api-key",
           label: acct.label ?? `${acct.provider} (${acct.id})`,
-          apiKey: key,
-          ...(acct.baseUrl ? { baseUrl: acct.baseUrl } : {}),
-          ...(acct.authProviderId ? { authProviderId: acct.authProviderId } : {}),
+          credential,
+          health: { state: "ok" },
         });
+        ensureProfile(name).accountIds.push(acct.id);
       }
     }
   }
@@ -191,4 +212,41 @@ export async function loadAccounts(opts: LoadAccountsOptions = {}): Promise<Load
 
   const manager = new CredentialManager({ accounts, profiles });
   return { manager, registry, secretStore };
+}
+
+export interface PersistOnboardedAccountOptions {
+  /** Config root holding `accounts.json`. Default: `configDir()`. */
+  dir?: string;
+  profileName: string;
+  id: string;
+  provider: string;
+  label?: string;
+  policy?: RotationPolicy;
+}
+
+/**
+ * Persist a KEYLESS account entry to `<dir>/accounts.json` so an in-app
+ * onboarding key survives a restart. The raw key is NEVER written here — it
+ * stays in the encrypted secret store under `api-key:<id>`; this entry only
+ * references it by `id`, and `loadAccounts` resolves it from the store on the
+ * next launch. Merges into any existing `accounts.json` (never clobbers other
+ * profiles or accounts); re-persisting the same id updates in place.
+ */
+export async function persistOnboardedAccount(opts: PersistOnboardedAccountOptions): Promise<void> {
+  const dir = opts.dir ?? configDir();
+  const path = join(dir, "accounts.json");
+  const file: AccountsFile = (await readAccountsFile(path)) ?? {};
+  file.profiles ??= {};
+  const profile: FileProfile = (file.profiles[opts.profileName] ??= { accounts: [] });
+  if (opts.policy) profile.policy = opts.policy;
+  profile.accounts ??= [];
+  const entry: FileAccount = {
+    id: opts.id,
+    provider: opts.provider,
+    label: opts.label ?? `${opts.provider} (in-app)`,
+  };
+  const idx = profile.accounts.findIndex((a) => a.id === opts.id);
+  if (idx >= 0) profile.accounts[idx] = entry;
+  else profile.accounts.push(entry);
+  await writeFile(path, `${JSON.stringify(file, null, 2)}\n`, "utf8");
 }

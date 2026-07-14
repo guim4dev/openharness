@@ -3,7 +3,7 @@ import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer } from "ws";
 import type { WebSocket } from "ws";
-import { configDir, createLiveSession } from "@openharness/core";
+import { configDir, createLiveSession, persistOnboardedAccount } from "@openharness/core";
 import type { CreateLiveSessionOptions, LiveSession } from "@openharness/core";
 import { BundleVerificationError } from "@openharness/bundle";
 
@@ -73,6 +73,13 @@ export type StartSidecarOptions = CreateLiveSessionOptions & {
    * (fail-closed). Default 60_000ms. A short value is used by tests.
    */
   askTimeoutMs?: number;
+  /**
+   * Config dir whose `accounts.json` an in-app onboarding key is persisted into
+   * (keyless — the secret stays in the encrypted store) so it survives a restart.
+   * When omitted, onboarding is session-only (no durable write). `server.ts`
+   * passes `configDir()`; tests omit it to stay hermetic.
+   */
+  onboardConfigDir?: string;
 };
 
 function isPromptMessage(value: unknown): value is Extract<ClientMessage, { type: "prompt" }> {
@@ -138,7 +145,7 @@ function send(socket: WebSocket, message: ServerMessage): void {
  * `integrity_error` frame and runs no session. A designed refusal, not silence.
  */
 export async function startSidecar(opts: StartSidecarOptions): Promise<SidecarHandle> {
-  const { askTimeoutMs = 60_000, ...sessionOpts } = opts;
+  const { askTimeoutMs = 60_000, onboardConfigDir, ...sessionOpts } = opts;
   const token = randomBytes(32).toString("base64url");
 
   // The socket the ask dialog is shown on, and the asks awaiting an answer.
@@ -281,7 +288,7 @@ export async function startSidecar(opts: StartSidecarOptions): Promise<SidecarHa
         const id = `gui-${providerId}`;
         void secretStore
           .set(`api-key:${id}`, secret)
-          .then(() => {
+          .then(async () => {
             manager.addAccount(
               {
                 id,
@@ -293,6 +300,17 @@ export async function startSidecar(opts: StartSidecarOptions): Promise<SidecarHa
               },
               profile,
             );
+            if (onboardConfigDir) {
+              // Best-effort durability: persist a keyless accounts.json entry so
+              // the key (kept in the encrypted store) survives a restart. A
+              // failure doesn't block this session — the account is live in-memory.
+              await persistOnboardedAccount({
+                dir: onboardConfigDir,
+                profileName: profile,
+                id,
+                provider: providerId,
+              }).catch(() => {});
+            }
             if (isReady()) {
               // Broadcast: any other client that connected while unconfigured is
               // also waiting on the onboarding panel — release them all.

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { loadAccounts } from "@openharness/core";
+import { configDir, loadAccounts } from "@openharness/core";
 import { loadHarnessDefinition } from "@openharness/definition";
 import { startSidecar } from "./sidecar.ts";
 import type { StartSidecarOptions } from "./sidecar.ts";
@@ -89,6 +89,7 @@ async function main(): Promise<void> {
     registry,
     secretStore, // REQUIRED for in-app onboarding: set_credential writes the key here.
     profile,
+    onboardConfigDir: configDir(), // persist an onboarded key (keyless) so it survives restart
     ...(verified ? { verified } : { harnessPath: harnessPath as string }),
     ...(process.env.OH_CWD ? { cwd: process.env.OH_CWD } : {}),
   };

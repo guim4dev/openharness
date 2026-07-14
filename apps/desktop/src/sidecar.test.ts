@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import {
@@ -166,7 +166,9 @@ function driveOnboarding(url: string, secret: string): Promise<Frame[]> {
 }
 
 /** Start a sidecar whose profile has NO account yet (drives the onboarding path). */
-async function startEmptyCredentialSidecar(): Promise<{
+async function startEmptyCredentialSidecar(
+  opts: { onboardConfigDir?: string } = {},
+): Promise<{
   sidecar: SidecarHandle;
   store: InMemorySecretStore;
   manager: CredentialManager;
@@ -188,6 +190,7 @@ async function startEmptyCredentialSidecar(): Promise<{
     agentDir: join(tmp, "agent"),
     noExtensions: true,
     modelRegistryOverride: stubRegistry(),
+    ...(opts.onboardConfigDir ? { onboardConfigDir: opts.onboardConfigDir } : {}),
   });
   return { sidecar, store, manager };
 }
@@ -664,6 +667,27 @@ test("onboarding: announces needs_setup with no credential, then set_credential 
     // The key was persisted locally and an account now resolves for the provider.
     expect(await store.get("api-key:gui-anthropic")).toBe("sk-user-pasted-key");
     expect(manager.activeAccount("work", "anthropic")?.id).toBe("gui-anthropic");
+  } finally {
+    await sidecar.close();
+  }
+});
+
+test("onboarding persists a keyless accounts.json entry so the key survives a restart", async () => {
+  const { sidecar, store } = await startEmptyCredentialSidecar({ onboardConfigDir: tmp });
+  try {
+    const url = `ws://127.0.0.1:${sidecar.port}?token=${encodeURIComponent(sidecar.token)}`;
+    const frames = await driveOnboarding(url, "sk-durable-key");
+    expect(frames.some((f) => f.type === "ready")).toBe(true);
+
+    // A keyless entry landed in accounts.json (the raw key is NOT on disk there)...
+    const raw = await readFile(join(tmp, "accounts.json"), "utf8");
+    expect(raw).not.toContain("sk-durable-key");
+    const file = JSON.parse(raw) as { profiles: Record<string, { accounts: { id: string; apiKey?: string }[] }> };
+    const entry = file.profiles.work.accounts.find((a) => a.id === "gui-anthropic");
+    expect(entry).toBeDefined();
+    expect(entry?.apiKey).toBeUndefined();
+    // ...while the secret itself lives in the encrypted store, ready for loadAccounts.
+    expect(await store.get("api-key:gui-anthropic")).toBe("sk-durable-key");
   } finally {
     await sidecar.close();
   }
