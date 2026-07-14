@@ -24,3 +24,7 @@ export { createApprovalQueue } from "./approval.ts";
 export type { ApprovalQueue, PendingApproval } from "./approval.ts";
 export { createConnectorSessions } from "./sessions.ts";
 export type { ConnectorSessions } from "./sessions.ts";
+export { createDpopFetch, dpopFromHttp, dpopHeaders, proofUrl } from "./dpop-http.ts";
+export type { FetchLike } from "./dpop-http.ts";
+export { startGatewayHttp } from "./http.ts";
+export type { GatewayHttpOptions, GatewayHttpServer } from "./http.ts";
