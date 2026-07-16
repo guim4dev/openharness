@@ -1,5 +1,5 @@
 import { readFile, access } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { parsePolicy, PolicyError } from "@openharness/policy";
 import { loadPromptLibrary, resolvePrompt, PromptLibraryError, type PromptLibrary } from "@openharness/prompts";
 import { harnessManifestSchema } from "./schema.ts";
@@ -32,13 +32,29 @@ export async function loadHarnessDefinition(rootDir: string): Promise<HarnessDef
   if (!parsed.success) throw new HarnessDefinitionError(`harness.json is invalid:\n${parsed.error.toString()}`);
   const manifest = parsed.data;
 
+  // SECURITY: a file/dir path in the manifest must resolve INSIDE the definition
+  // dir. Without this, an unverified definition (the dev `chat <dir>` path loads
+  // one WITHOUT signature verification) could set `systemPrompt: "../../etc/passwd"`
+  // and exfiltrate any readable file into the system prompt sent to the provider.
+  // (The build path had a completeness check; this makes the loader itself safe
+  // for every caller. `lib:` refs are map-key lookups and never touch the FS.)
+  const insideRoot = (value: string, fieldName: string): string => {
+    const abs = resolve(root, value);
+    if (abs !== root && !abs.startsWith(root + sep)) {
+      throw new HarnessDefinitionError(
+        `${fieldName} references '${value}', which resolves OUTSIDE the definition dir — refusing to read it.`,
+      );
+    }
+    return abs;
+  };
+
   // Optional shared PromptLibrary (a dir of curated .md prompts). Loaded before
   // resolving systemPrompt/appendSystemPrompt since either may reference it via
   // a `lib:<name>` ref. Must live inside the definition dir to be included when
   // this definition is bundled (bundleDefinition walks files under rootDir only).
   let promptLibrary: PromptLibrary | undefined;
   if (manifest.promptLibrary) {
-    const libDir = join(root, manifest.promptLibrary);
+    const libDir = insideRoot(manifest.promptLibrary, "promptLibrary");
     try {
       promptLibrary = await loadPromptLibrary(libDir);
     } catch (e) {
@@ -64,7 +80,7 @@ export async function loadHarnessDefinition(rootDir: string): Promise<HarnessDef
         throw e;
       }
     }
-    const p = join(root, value);
+    const p = insideRoot(value, fieldName);
     if (!(await exists(p))) throw new HarnessDefinitionError(`${fieldName} file not found: ${p}`);
     return readFile(p, "utf8");
   }
@@ -78,13 +94,13 @@ export async function loadHarnessDefinition(rootDir: string): Promise<HarnessDef
 
   const skillDirs: HarnessDefinition["skillDirs"] = [];
   for (const s of manifest.skills) {
-    const abs = join(root, s.path);
+    const abs = insideRoot(s.path, `skill '${s.path}'`);
     if (s.mandatory && !(await exists(join(abs, "SKILL.md"))))
       throw new HarnessDefinitionError(`Mandatory skill '${s.path}' is missing SKILL.md at ${abs}`);
     skillDirs.push({ path: abs, mandatory: s.mandatory });
   }
 
-  const iconPath = manifest.branding.icon ? join(root, manifest.branding.icon) : undefined;
+  const iconPath = manifest.branding.icon ? insideRoot(manifest.branding.icon, "branding.icon") : undefined;
 
   // Optional policy.json. Absent => no policy (enforcement is a no-op). A present
   // but malformed file is a hard error: a broken security policy must fail loud,

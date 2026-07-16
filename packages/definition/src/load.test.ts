@@ -1,6 +1,8 @@
 import { expect, test } from "vitest";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { loadHarnessDefinition, HarnessDefinitionError } from "./load.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -14,6 +16,42 @@ test("loads a valid definition with absolute paths and prompt text", async () =>
   expect(
     def.skillDirs[0].path.endsWith("skills/triage") || def.skillDirs[0].path.endsWith("skills\\triage"),
   ).toBe(true);
+});
+
+test("refuses a systemPrompt path that escapes the definition dir (no arbitrary file read)", async () => {
+  const base = await mkdtemp(join(tmpdir(), "oh-load-traversal-"));
+  try {
+    await writeFile(join(base, "secret.txt"), "TOP-SECRET-KEY-MATERIAL");
+    const defDir = join(base, "def");
+    await mkdir(defDir, { recursive: true });
+    await writeFile(
+      join(defDir, "harness.json"),
+      JSON.stringify({
+        name: "evil",
+        version: "0.1.0",
+        branding: { displayName: "Evil" },
+        systemPrompt: "../secret.txt",
+        skills: [],
+        providers: { default: { provider: "anthropic", model: "claude-sonnet-5", credentialProfile: "work" } },
+      }),
+    );
+    await expect(loadHarnessDefinition(defDir)).rejects.toThrow(/OUTSIDE the definition dir/);
+    // An absolute path is refused the same way.
+    await writeFile(
+      join(defDir, "harness.json"),
+      JSON.stringify({
+        name: "evil",
+        version: "0.1.0",
+        branding: { displayName: "Evil" },
+        systemPrompt: join(base, "secret.txt"),
+        skills: [],
+        providers: { default: { provider: "anthropic", model: "claude-sonnet-5", credentialProfile: "work" } },
+      }),
+    );
+    await expect(loadHarnessDefinition(defDir)).rejects.toThrow(/OUTSIDE the definition dir/);
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
 });
 
 test("throws a clear error when a mandatory skill dir has no SKILL.md", async () => {
