@@ -87,9 +87,14 @@ party, and the employee's machine never sees the secret.
 > **runnable** — `openharness-gateway serve <config.json>` boots the pipeline from
 > a zod-validated config against a machine-local encrypted secret store.
 > **Remaining:** deploy hardening — a real IdP/token-exchange flow, a KMS-backed
-> broker, a containerized connector sandbox. The connector/broker layer is behind swappable
-> interfaces so [OpenConnector](vision.md#13) can slot in as the backend once it
-> matures.
+> broker, a containerized connector sandbox — now **designed**
+> ([`specs/2026-07-16-gateway-deploy-hardening-design.md`](specs/2026-07-16-gateway-deploy-hardening-design.md)):
+> each grounded in a mature standard (OAuth 2.1 token exchange / RFC 8693, cloud
+> KMS, out-of-process workers), swapping a dev implementation behind an interface
+> that already exists — awaiting the human calls in that spec's §7 (which IdP,
+> which KMS, latency budget) before implementation. The connector/broker layer is
+> behind swappable interfaces so [OpenConnector](vision.md#13) can slot in as the
+> backend once it matures.
 
 This is also where the ecosystem's sharpest edges live, so the design is
 constrained by them rather than discovering them later:
