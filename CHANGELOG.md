@@ -7,7 +7,7 @@ All notable changes to OpenHarness. This project adheres to
 ## [Unreleased] — 2026-07-14 (initial build)
 
 The first end-to-end build: a company can define its own harness and ship it,
-governed and signed, to a TUI and a desktop app. 420 tests, MIT, built on
+governed and signed, to a TUI and a desktop app. 424 tests, MIT, built on
 [Pi](https://pi.dev).
 
 ### Added
@@ -87,7 +87,7 @@ governed and signed, to a TUI and a desktop app. 420 tests, MIT, built on
   `openharness-gateway serve <config.json>` boots the whole pipeline from a
   zod-validated config (keys, policy, pinned catalog, connectors) against a
   machine-local encrypted secret store — credentials referenced by name, never
-  in the config. Deploy hardening (real IdP/token-exchange, KMS-backed broker,
+  in the config, and populated with `openharness-gateway set-secret` (STDIN, never argv). Deploy hardening (real IdP/token-exchange, KMS-backed broker,
   containerized connector sandbox) remains.
 - **Example harnesses** — `acme-fintech` (deny-by-default, AWS-key redaction),
   `northwind-ops` (ask-on-writes, PII redaction), `meridian-support` (the
