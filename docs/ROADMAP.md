@@ -151,8 +151,8 @@ questions a human must answer first) is in
   name, no file dialog) and runs doctor, surfacing the verdict. The headless path
   is `openharness materialize <spec> <dir>`. The write+doctor+sanitize core, the
   reducer, and the panel are unit-tested; the WS/Tauri round-trip is
-  typecheck-verified (not yet exercised in a running app). Remaining polish:
-  a load-existing-definition flow and richer skill authoring.
+  typecheck-verified (not yet exercised in a running app). It now reopens a saved definition to edit (round-trip-safe — the gateway pin
+  survives) and saves it again. Remaining polish: richer skill authoring.
 - **Managed cloud** — a hosted gateway + bundle host + audit sink for orgs that
   don't want to run infra, with the self-hosted path always a first-class equal.
 
