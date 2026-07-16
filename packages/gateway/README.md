@@ -49,8 +49,13 @@ A minimal `gateway.json` (credentials are referenced by name, never value):
 
 The org's per-upstream secrets live in an encrypted store beside the config
 (`<config-dir>/secrets`, or set `OPENHARNESS_GATEWAY_SECRETS`), keyed
-`upstream:<id>`. Populate it out of band; the config file itself is safe to
-commit. The gateway's `pubkey` is pinned inside the harness's signed definition,
+`upstream:<id>`. Populate it with `set-secret` (the value is read from STDIN, so
+it never lands in argv or shell history) — the config file itself is safe to
+commit:
+
+```bash
+printf %s "$GITHUB_TOKEN" | openharness-gateway set-secret github --config gateway.json
+``` The gateway's `pubkey` is pinned inside the harness's signed definition,
 so the harness refuses a gateway that can't prove the matching private key.
 
 ## Security model

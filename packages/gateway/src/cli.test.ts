@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { main } from "./cli.ts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { EncryptedFileSecretStore } from "@openharness/credentials";
+import { main, setUpstreamSecret } from "./cli.ts";
 
 let logs: string[];
 let errs: string[];
@@ -39,4 +43,38 @@ test("serve without a config path errors with exit code 1", async () => {
   await main(["serve"]);
   expect(errs.join("\n")).toMatch(/requires a <config\.json>/);
   expect(process.exitCode).toBe(1);
+});
+
+test("--help documents set-secret", async () => {
+  await main(["--help"]);
+  expect(logs.join("\n")).toMatch(/set-secret/);
+});
+
+test("set-secret without an id errors with exit code 1", async () => {
+  await main(["set-secret"]);
+  expect(errs.join("\n")).toMatch(/requires an <id>/);
+  expect(process.exitCode).toBe(1);
+});
+
+test("setUpstreamSecret stores upstream:<id> and round-trips through the encrypted store", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "oh-gw-secret-"));
+  try {
+    await setUpstreamSecret(dir, "github", "ghp_orgtoken");
+    const store = await EncryptedFileSecretStore.open(dir);
+    expect(await store.get("upstream:github")).toBe("ghp_orgtoken");
+    // Never stored under the LLM-credential namespace.
+    expect(await store.get("api-key:github")).toBeUndefined();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("setUpstreamSecret rejects an invalid id and an empty value", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "oh-gw-secret-"));
+  try {
+    await expect(setUpstreamSecret(dir, "bad id!", "x")).rejects.toThrow(/invalid upstream id/);
+    await expect(setUpstreamSecret(dir, "github", "")).rejects.toThrow(/empty secret/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
