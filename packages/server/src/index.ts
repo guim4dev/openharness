@@ -69,17 +69,42 @@ function sendJson(res: ServerResponse, status: number, body: unknown, extraHeade
   res.end(JSON.stringify(body));
 }
 
+/** Max accepted request body. A single audit record is tiny; this is a generous
+ *  ceiling that stops an unbounded POST from exhausting memory. */
+const MAX_BODY_BYTES = 1_048_576; // 1 MiB
+
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    let size = 0;
+    let overLimit = false;
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      // Past the cap, stop buffering (memory stays bounded) but keep the stream
+      // flowing to `end` so we can answer with a clean 413 rather than killing
+      // the socket mid-upload (which the client sees as a connection error).
+      if (size > MAX_BODY_BYTES) {
+        overLimit = true;
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => {
+      if (overLimit) reject(new BodyTooLargeError(`request body exceeds ${MAX_BODY_BYTES} bytes`));
+      else resolve(Buffer.concat(chunks).toString("utf8"));
+    });
     req.on("error", reject);
   });
 }
 
+class BodyTooLargeError extends Error {}
+
 function isAuthorized(req: IncomingMessage, token: string | undefined): boolean {
-  if (!token) return true;
+  // Auth is disabled ONLY when no token is configured (undefined) — the local-dev
+  // default. A configured-but-empty token (e.g. an unset env var resolving to "")
+  // is a misconfiguration and must NOT silently disable auth: fall through and
+  // enforce (a normal client can't produce the matching empty bearer).
+  if (token === undefined) return true;
   const provided = req.headers.authorization;
   if (typeof provided !== "string") return false;
   // Constant-time comparison. We hash both sides to fixed-length (32-byte)
@@ -96,7 +121,12 @@ function isAuthorized(req: IncomingMessage, token: string | undefined): boolean 
 function resolveSource(req: IncomingMessage, url: URL): string {
   const header = req.headers["x-oh-source"];
   const fromHeader = typeof header === "string" ? header : Array.isArray(header) ? header[0] : undefined;
-  return fromHeader ?? url.searchParams.get("source") ?? "default";
+  // Lowercase the id: the retained-HEAD map is keyed by this string while the log
+  // file is `ingested-<source>.jsonl`. On a case-insensitive filesystem
+  // (macOS/Windows) `laptop-a` and `Laptop-A` are DISTINCT map keys but the SAME
+  // file — a stale cache under one casing would then accept a fork appended under
+  // the other. Normalizing keeps the map key and the filename in lockstep.
+  return (fromHeader ?? url.searchParams.get("source") ?? "default").toLowerCase();
 }
 
 /**
@@ -137,7 +167,11 @@ function findBundle(dir: string, name: string | null): Bundle | null {
     } catch {
       continue; // ignore unreadable/corrupt files rather than failing the whole listing
     }
-    if (name && bundle.manifest?.name !== name) continue;
+    // Skip a structurally-invalid bundle (valid JSON but no usable manifest):
+    // reading `manifest.createdAt` off it would throw and 500 the whole endpoint,
+    // taking bundle distribution down for one stray file.
+    if (typeof bundle?.manifest?.name !== "string" || typeof bundle.manifest.createdAt !== "string") continue;
+    if (name && bundle.manifest.name !== name) continue;
     if (!best || bundle.manifest.createdAt > best.manifest.createdAt) best = bundle;
   }
   return best;
@@ -187,7 +221,16 @@ async function handleRequest(
       return;
     }
 
-    const body = await readBody(req);
+    let body: string;
+    try {
+      body = await readBody(req);
+    } catch (e) {
+      if (e instanceof BodyTooLargeError) {
+        sendJson(res, 413, { error: "request body too large" });
+        return;
+      }
+      throw e;
+    }
     const lines = body
       .split("\n")
       .map((l) => l.trim())

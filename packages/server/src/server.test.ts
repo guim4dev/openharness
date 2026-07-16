@@ -1,7 +1,7 @@
 import { afterAll, expect, test } from "vitest";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import {
   BundleVerificationError,
@@ -392,6 +392,67 @@ test("binds to 127.0.0.1 by default with an ephemeral port", async () => {
   try {
     expect(url).toBe(`http://127.0.0.1:${port}`);
     expect(port).toBeGreaterThan(0);
+  } finally {
+    await close();
+  }
+});
+
+test("audit continuity: a case-variant source cannot desync the HEAD and inject a fork", async () => {
+  const auditDir = tmp();
+  const server = createOpenHarnessServer({ bundlesDir: tmp(), auditDir });
+  const { url, close } = await server.start();
+  try {
+    // Establish a chain under one casing.
+    const first = await fetch(`${url}/audit`, { method: "POST", headers: { "x-oh-source": "laptop-a" }, body: body(chain(3)) });
+    expect(first.status).toBe(200);
+    // Re-submit from genesis under a DIFFERENT casing (same file on a
+    // case-insensitive FS). Must be refused as a fork, not bootstrapped afresh.
+    const fork = await fetch(`${url}/audit`, { method: "POST", headers: { "x-oh-source": "Laptop-A" }, body: body(chain(3)) });
+    expect(fork.status).toBe(409);
+    // The retained file stays a single valid chain.
+    expect(verifyAuditLog(join(auditDir, "ingested-laptop-a.jsonl")).ok).toBe(true);
+  } finally {
+    await close();
+  }
+});
+
+test("GET /bundle ignores a structurally-invalid .ohbundle instead of 500ing the endpoint", async () => {
+  const bundlesDir = tmp();
+  const { privateKey } = generateKeypair();
+  writeBundle(bundleDefinition(exampleDir, privateKey), join(bundlesDir, "good.ohbundle"));
+  // A stray file: valid JSON, no usable manifest.
+  writeFileSync(join(bundlesDir, "broken.ohbundle"), JSON.stringify({ foo: 1 }));
+
+  const server = createOpenHarnessServer({ bundlesDir, auditDir: tmp() });
+  const { url, close } = await server.start();
+  try {
+    const res = await fetch(`${url}/bundle`);
+    expect(res.status).toBe(200); // the good bundle is returned; the stray file didn't take the endpoint down
+    expect((await res.json()).manifest.name).toBe("example");
+  } finally {
+    await close();
+  }
+});
+
+test("POST /audit rejects an oversized body with 413 (no unbounded buffering)", async () => {
+  const server = createOpenHarnessServer({ bundlesDir: tmp(), auditDir: tmp() });
+  const { url, close } = await server.start();
+  try {
+    const huge = "x".repeat(1_048_576 + 1024); // just over the 1 MiB cap
+    const res = await fetch(`${url}/audit`, { method: "POST", headers: { "x-oh-source": "big" }, body: huge });
+    expect(res.status).toBe(413);
+  } finally {
+    await close();
+  }
+});
+
+test("a configured-but-empty token does NOT silently disable auth (fail-closed misconfig)", async () => {
+  const server = createOpenHarnessServer({ bundlesDir: tmp(), auditDir: tmp(), token: "" });
+  const { url, close } = await server.start();
+  try {
+    // /health stays open; a sensitive route is enforced (not opened by the empty token).
+    expect((await fetch(`${url}/health`)).status).toBe(200);
+    expect((await fetch(`${url}/bundle`)).status).toBe(401);
   } finally {
     await close();
   }
