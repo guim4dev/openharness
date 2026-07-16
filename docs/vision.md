@@ -10,7 +10,7 @@ Last updated: 2026-07-14 (after an autonomous build night).
 
 ## 0. Current state (what's actually built)
 
-On `main`, **405 tests green**, typecheck + `cargo check` green. A cross-cutting
+On `main`, **412 tests green**, typecheck + `cargo check` green. A cross-cutting
 integration test proves MCP + policy + audit compose end-to-end in one live
 session, and adversarial review passes hardened the security claims (honest
 audit-integrity framing + server-side chain verification, policy fails loud on a
@@ -22,7 +22,14 @@ HTTP entry contains per-request failures instead of crashing the shared server.
 A further review of the v2.x/v3 work closed six more: three Postmark-tap bypasses
 (array-element, prototype-named key, value-override redirect), an IPv6/bracket
 SSRF gap, a replay-guard O(n²) DoS, a docker digest-pin false-negative, and a
-visual-builder round-trip that had silently dropped the gateway pin. Packages/apps:
+visual-builder round-trip that had silently dropped the gateway pin. A review of
+the trust-critical core + server then closed five more — the two most serious
+being a policy-enforcement fail-OPEN (pathologically-deep tool args overflowed
+the arg-matcher and let a denied tool run unblocked; now depth-bounded +
+fail-closed) and a build key-leak (the signing key was bundled into the
+distributed artifact if placed in the definition dir; now refused) — plus an
+audit case-desync fork, a bundle-endpoint DoS, and an unbounded request body.
+Packages/apps:
 
 - **`@openharness/definition`** — HarnessDefinition (dir + `harness.json` + optional
   `policy.json` + `mcp` + `gateway` sections), zod-validated, fail-fast loader.
