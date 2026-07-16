@@ -1,6 +1,6 @@
 import { createFileAuditLog } from "@openharness/audit";
 import type { SecretStore } from "@openharness/credentials";
-import { SecretStoreKms } from "./broker.ts";
+import { SecretStoreKms, type KmsStore } from "./broker.ts";
 import { createApprovalQueue } from "./approval.ts";
 import { createConnectorSessions } from "./sessions.ts";
 import { createGithubReadConnector } from "./connectors/github-read.ts";
@@ -26,6 +26,14 @@ export interface StartGatewayFromConfigOptions {
    * never live in the config file.
    */
   secretStore: SecretStore;
+  /**
+   * Credential broker override. When set, the pipeline uses it instead of the
+   * default local `SecretStoreKms(secretStore)` — this is the seam a production
+   * deployment fills with a KMS-backed `KmsBrokerStore` (deploy hardening §4), so
+   * the gateway holds no long-lived plaintext. `secretStore` is then unused for
+   * upstream credentials.
+   */
+  broker?: KmsStore;
   /**
    * Extra/override connector factories by `type`, merged OVER the built-in
    * registry. Lets a deployment register a private connector, and lets a test
@@ -68,7 +76,7 @@ export async function startGatewayFromConfig(
     pipeline: {
       policy: config.policy,
       policyVersion: config.policyVersion,
-      broker: new SecretStoreKms(opts.secretStore),
+      broker: opts.broker ?? new SecretStoreKms(opts.secretStore),
       sessions: createConnectorSessions(factories),
       audit: createFileAuditLog(config.auditPath),
       approval: createApprovalQueue(config.approval ?? { timeoutMs: 30_000 }),

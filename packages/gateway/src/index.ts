@@ -17,6 +17,8 @@ export type { GatewayClaims, Principal, Deny, IncomingRequest, ReplayGuard } fro
 export { decide } from "./pdp.ts";
 export { SecretStoreKms } from "./broker.ts";
 export type { KmsStore, UpstreamCredential } from "./broker.ts";
+export { KmsBrokerStore, LocalKms, InMemorySecretsManager } from "./broker-kms.ts";
+export type { KmsClient, SecretsManager, WrappedSecret } from "./broker-kms.ts";
 export { egressAllowed, isPrivateHost, tapInjectedField } from "./egress.ts";
 export type { Connector, ConnectorResult } from "./connectors/index.ts";
 export { createGithubReadConnector } from "./connectors/github-read.ts";
