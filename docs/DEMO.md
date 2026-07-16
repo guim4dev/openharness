@@ -105,6 +105,55 @@ CISO.
   Go / Claude Max). Consumer ChatGPT subscriptions are personal-use only (never
   pooled across employees — D11).
 
+## 6. v2 — the moat: govern a credential server-side (built)
+
+The employee's harness reaches a sensitive upstream through an org **gateway**
+instead of holding the credential — the org secret + egress never touch the laptop.
+
+```bash
+# The org populates the gateway's upstream credential (value read from STDIN,
+# never argv) and runs it from a config (keys · policy · pinned catalog · connectors):
+printf %s "$GITHUB_TOKEN" | openharness-gateway set-secret github --config gateway.json
+openharness-gateway serve gateway.json      # → [openharness-gateway] listening at http://127.0.0.1:PORT/mcp
+
+# A harness DECLARES that gateway (url + PINNED ed25519 pubkey + tools). The example:
+npm run chat -- doctor harnesses/acme-gateway    # → doctor: acme-gateway@0.1.0 OK
+```
+
+At runtime the harness bridges the gateway's tools as `mcp__gateway__<tool>`; every
+request is DPoP-authenticated at the edge (a leaked token is worthless off the
+client machine — single-use proof, key-bound), decided by the SAME policy engine
+server-side, credential-brokered only AFTER the allow, and audited — no token
+passthrough. A write connector (`notify`) routes its outbound request through a
+forward-proxy tap that blocks an unsanctioned field (a silently-injected BCC — the
+Postmark defense) before egress. (Config shape: `packages/gateway/README.md`.)
+
+## 7. Author a definition without hand-editing JSON
+
+```bash
+# Headless: a spec → a doctor-clean definition on disk.
+npm run chat -- materialize my-harness.spec.json ./my-harness
+# → materialized 3 file(s) at ./my-harness — doctor OK
+```
+
+Or visually: the desktop app's **Build a harness** panel fills branding / prompt /
+provider / policy rules / skills / MCP servers, renders the live `harness.json` +
+`policy.json` with field-level validation, saves via the loopback sidecar, and can
+reopen a saved definition to edit it (round-trip-safe — a declared gateway pin
+survives).
+
+## 8. Supply-chain + compliance
+
+```bash
+# Refuse to ship an MCP server fetched unpinned on launch (the Postmark-class rug-pull),
+# across npm / PyPI / container (containers pinned only by an @sha256: digest):
+npm run chat -- doctor <dir> --strict-supply-chain     # unpinned server → build-failing error
+
+# Export the authoritative audit trail for SIEM/retention, with an integrity manifest:
+npm run chat -- audit export audit.log --type tool_call --out export.ndjson
+# → exported N/M records to export.ndjson (verified=true, head=<hash>)
+```
+
 ## Run it live (one turn, your key)
 
 ```bash
@@ -130,12 +179,14 @@ of bug that hides until a real install.
   corruption and naive edits — a writer can re-chain a forgery locally. Tamper-
   **evidence** for the audit trail comes from shipping entries to the server,
   which retains a per-source HEAD and rejects re-chained/forked/gapped
-  submissions; the server's retained copy is the anchor. The future remote MCP
-  gateway (org secrets server-side) doesn't make bypass *pointless* — a patched
-  binary still holds a valid session — but it **confines and audits the blast
-  radius**: the credential never touches the laptop, so a compromised endpoint
-  means abuse limited to one user's policy scope and revocable in one place, not
-  stolen org secrets used invisibly. (Design: `specs/2026-07-14-remote-mcp-gateway-design.md`.)
+  submissions; the server's retained copy is the anchor. The remote MCP gateway
+  (org secrets server-side, now **built** — §6) doesn't make bypass *pointless* —
+  a patched binary still holds a valid session — but it **confines and audits the
+  blast radius**: the credential never touches the laptop, so a compromised
+  endpoint means abuse limited to one user's policy scope and revocable in one
+  place, not stolen org secrets used invisibly. (Design:
+  `specs/2026-07-14-remote-mcp-gateway-design.md`; deploy hardening:
+  `specs/2026-07-16-gateway-deploy-hardening-design.md`.)
 - Until OS code-signing seals the app bundle, the *definition* integrity is
   verified but the shell still trusts whatever sidecar binary sits next to it
   (*code* integrity isn't sealed yet). That's the OS-signing follow-up.
