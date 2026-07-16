@@ -173,6 +173,20 @@ export async function buildHarnessApp(
   //     work if it references files outside its dir (they would not be bundled).
   const def = await loadHarnessDefinition(defDir);
   assertReferencedPathsInside(defDir, def.manifest);
+
+  // EVERY file under the definition dir is base64-embedded into the signed,
+  // distributed bundle. The private signing key must therefore live OUTSIDE it —
+  // bundling it would ship the org's signing root to every recipient (they could
+  // then forge any bundle). Refuse loudly before doing any work rather than leak.
+  const keyAbs = resolve(opts.privateKeyPath);
+  if (keyAbs === defDir || keyAbs.startsWith(defDir + sep)) {
+    throw new Error(
+      `buildHarnessApp: the private signing key (${keyAbs}) is INSIDE the definition dir (${defDir}). ` +
+        `Every file in the definition dir is bundled into the distributed, signed artifact — bundling the ` +
+        `private key would ship your signing root to every recipient. Move the key outside the definition dir.`,
+    );
+  }
+
   const name = opts.name ?? def.manifest.name;
   const org = opts.org ?? "org";
   const identifier = `ai.openharness.${idSegment(org)}.${idSegment(name)}`;

@@ -210,6 +210,39 @@ test("(f) an inside-dir definition passes path validation and builds (the exampl
   expect(existsSync(join(outDir, "resources", "harness.ohbundle"))).toBe(true);
 });
 
+test("(g) FAIL-LOUD: a private signing key INSIDE the definition dir is refused (never bundled)", async () => {
+  const work = mkdtempSync(join(tmpdir(), "oh-build-keyleak-"));
+  tmps.push(work);
+  const defDir = join(work, "def");
+  mkdirSync(join(defDir, "skills", "triage"), { recursive: true });
+  writeFileSync(join(defDir, "skills", "triage", "SKILL.md"), "# triage\n");
+  writeFileSync(join(defDir, "system-prompt.md"), "You are helpful.\n");
+  writeFileSync(
+    join(defDir, "harness.json"),
+    JSON.stringify({
+      name: "keyleaker",
+      version: "0.1.0",
+      branding: { displayName: "Key Leaker" },
+      systemPrompt: "system-prompt.md",
+      skills: [{ path: "skills/triage", mandatory: true }],
+      providers: { default: { provider: "anthropic", model: "claude-sonnet-5", credentialProfile: "work" } },
+    }),
+  );
+
+  // The signing key dropped INSIDE the definition dir — would otherwise be
+  // base64-embedded into the distributed signed bundle.
+  const kp = generateKeypair();
+  const keyPath = join(defDir, "org.key");
+  writeFileSync(keyPath, kp.privateKey, { mode: 0o600 });
+
+  await expect(
+    buildHarnessApp({ defDir, privateKeyPath: keyPath, outDir: join(work, "out"), org: "acme", name: "keyleaker" }),
+  ).rejects.toThrow(/INSIDE the definition dir|signing root/i);
+
+  // Refused before any artifact was produced.
+  expect(existsSync(join(work, "out", "resources", "harness.ohbundle"))).toBe(false);
+});
+
 test("(d) server.mjs exists and boots to a verified handshake from the baked resources", async () => {
   const serverPath = join(outDir, "resources", "server.mjs");
   expect(existsSync(serverPath)).toBe(true);
