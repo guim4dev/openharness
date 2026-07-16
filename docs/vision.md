@@ -10,7 +10,7 @@ Last updated: 2026-07-14 (after an autonomous build night).
 
 ## 0. Current state (what's actually built)
 
-On `main`, **412 tests green**, typecheck + `cargo check` green. A cross-cutting
+On `main`, **420 tests green**, typecheck + `cargo check` green. A cross-cutting
 integration test proves MCP + policy + audit compose end-to-end in one live
 session, and adversarial review passes hardened the security claims (honest
 audit-integrity framing + server-side chain verification, policy fails loud on a
@@ -28,7 +28,13 @@ being a policy-enforcement fail-OPEN (pathologically-deep tool args overflowed
 the arg-matcher and let a denied tool run unblocked; now depth-bounded +
 fail-closed) and a build key-leak (the signing key was bundled into the
 distributed artifact if placed in the definition dir; now refused) — plus an
-audit case-desync fork, a bundle-endpoint DoS, and an unbounded request body.
+audit case-desync fork, a bundle-endpoint DoS, and an unbounded request body. A
+final review of the MCP bridge + loader closed one more HIGH — the loader read
+any file a definition's `systemPrompt` pointed at, so an unverified definition
+could exfiltrate `../../etc/passwd` into the system prompt (now containment-checked)
+— plus untrusted-MCP-server hardening (unsafe tool names skipped, results capped,
+malformed results guarded, `__` barred from server names). Across four review
+passes, 12+ real bugs — several HIGH — were found and fixed with regression tests.
 Packages/apps:
 
 - **`@openharness/definition`** — HarnessDefinition (dir + `harness.json` + optional
