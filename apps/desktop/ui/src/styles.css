@@ -549,6 +549,30 @@ body {
   margin: 0;
 }
 
+.builder-head-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.builder-load {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-soft);
+}
+
+.builder-load select {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 9px;
+}
+
 .builder-back {
   font: inherit;
   font-size: 13px;

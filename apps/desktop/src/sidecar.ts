@@ -3,6 +3,7 @@ import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer } from "ws";
 import type { WebSocket } from "ws";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { configDir, createLiveSession, persistOnboardedAccount, runDoctor } from "@openharness/core";
 import type { CreateLiveSessionOptions, DoctorProblem, LiveSession } from "@openharness/core";
@@ -31,7 +32,11 @@ export type ClientMessage =
    * are the `harness.json`/`policy.json` objects; `systemPrompt` becomes
    * `system-prompt.md`.
    */
-  | { type: "save_definition"; name: string; manifest: unknown; policy?: unknown; systemPrompt: string };
+  | { type: "save_definition"; name: string; manifest: unknown; policy?: unknown; systemPrompt: string }
+  /** Ask for the names of previously-saved definitions (to reopen one in the builder). */
+  | { type: "list_definitions" }
+  /** Load a saved definition's raw files back into the builder for editing. */
+  | { type: "load_definition"; name: string };
 
 /** Frames the sidecar streams back to the client. */
 export type ServerMessage =
@@ -71,7 +76,11 @@ export type ServerMessage =
    * found no errors (`ok`), and the doctor `problems` (warnings included). On a
    * write/validation failure, `ok` is false and `error` explains it.
    */
-  | { type: "definition_saved"; ok: boolean; dir: string; problems: DoctorProblem[]; error?: string };
+  | { type: "definition_saved"; ok: boolean; dir: string; problems: DoctorProblem[]; error?: string }
+  /** The saved-definition names, in response to `list_definitions`. */
+  | { type: "definitions_listed"; names: string[] }
+  /** A saved definition's raw files, in response to `load_definition` (or an `error`). */
+  | { type: "definition_loaded"; name: string; manifest?: unknown; policy?: unknown; systemPrompt?: string; error?: string };
 
 export interface SidecarHandle {
   /** Ephemeral loopback port the WS server is listening on. */
@@ -171,6 +180,41 @@ export async function saveDefinition(
   }
   const report = await runDoctor(dir);
   return { ok: report.ok, dir, problems: report.problems };
+}
+
+export interface LoadedDefinition {
+  manifest: Record<string, unknown>;
+  policy?: Record<string, unknown>;
+  systemPrompt: string;
+}
+
+/** Names of definitions the builder saved under `baseDir` (subdirs with a harness.json). */
+export function listDefinitions(baseDir: string): string[] {
+  if (!existsSync(baseDir)) return [];
+  return readdirSync(baseDir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && existsSync(join(baseDir, e.name, "harness.json")))
+    .map((e) => e.name)
+    .sort();
+}
+
+/**
+ * Read a saved definition's RAW files (`harness.json` + optional `policy.json` +
+ * `system-prompt.md`) so the visual builder can reopen and edit it. The name is
+ * sanitized to `[a-z0-9-]` (same as the save path) so it can't traverse out of
+ * `baseDir`. Pure and testable.
+ */
+export function loadDefinitionForEdit(baseDir: string, name: string): LoadedDefinition {
+  const safe = name.trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
+  if (!safe) throw new Error("invalid definition name");
+  const dir = join(baseDir, safe);
+  const manifest = JSON.parse(readFileSync(join(dir, "harness.json"), "utf8")) as Record<string, unknown>;
+  const policyPath = join(dir, "policy.json");
+  const policy = existsSync(policyPath)
+    ? (JSON.parse(readFileSync(policyPath, "utf8")) as Record<string, unknown>)
+    : undefined;
+  const promptPath = join(dir, "system-prompt.md");
+  const systemPrompt = existsSync(promptPath) ? readFileSync(promptPath, "utf8") : "";
+  return { manifest, ...(policy ? { policy } : {}), systemPrompt };
 }
 
 function send(socket: WebSocket, message: ServerMessage): void {
@@ -404,6 +448,25 @@ export async function startSidecar(opts: StartSidecarOptions): Promise<SidecarHa
               error: (e as Error)?.message ?? "save failed",
             }),
           );
+        return;
+      }
+
+      // List / load previously-saved definitions so the builder can reopen one.
+      if ((parsed as { type?: unknown }).type === "list_definitions") {
+        send(socket, { type: "definitions_listed", names: listDefinitions(join(configDir(), "definitions")) });
+        return;
+      }
+      if (
+        (parsed as { type?: unknown }).type === "load_definition" &&
+        typeof (parsed as { name?: unknown }).name === "string"
+      ) {
+        const name = (parsed as { name: string }).name;
+        try {
+          const def = loadDefinitionForEdit(join(configDir(), "definitions"), name);
+          send(socket, { type: "definition_loaded", name, ...def });
+        } catch (e) {
+          send(socket, { type: "definition_loaded", name, error: (e as Error).message });
+        }
         return;
       }
       // A human's answer to an outstanding `ask`. Correlate by id; an answer

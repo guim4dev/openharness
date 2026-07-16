@@ -280,6 +280,10 @@ export function App() {
     submitCredential,
     saveDefinition,
     saveResult,
+    listDefinitions,
+    loadDefinition,
+    availableDefinitions,
+    loadedDefinition,
   } = useChat(connection);
   const [draft, setDraft] = useState("");
   const [view, setView] = useState<"chat" | "builder">("chat");
@@ -307,7 +311,11 @@ export function App() {
         onClose={() => setView("chat")}
         onSave={saveDefinition}
         canSave={connected}
+        onListDefinitions={listDefinitions}
+        onLoadDefinition={loadDefinition}
         {...(saveResult !== undefined ? { saveResult } : {})}
+        {...(availableDefinitions !== undefined ? { availableDefinitions } : {})}
+        {...(loadedDefinition !== undefined ? { loadedDefinition } : {})}
       />
     );
   }

@@ -1,5 +1,6 @@
-import { useBuilder, type PolicyAction } from "./builder.ts";
-import type { SaveResult } from "./chat.ts";
+import { useEffect, useRef } from "react";
+import { draftFromManifest, useBuilder, type PolicyAction } from "./builder.ts";
+import type { LoadedDefinition, SaveResult } from "./chat.ts";
 
 /**
  * Visual harness builder — author `harness.json` + `policy.json` from a form,
@@ -17,20 +18,75 @@ export interface BuilderPanelProps {
   canSave?: boolean;
   /** The last save outcome to surface (from the sidecar's `definition_saved`). */
   saveResult?: SaveResult;
+  /** Request the list of saved definitions (populates `availableDefinitions`). Absent → no load affordance. */
+  onListDefinitions?: () => void;
+  /** Load a saved definition for editing. */
+  onLoadDefinition?: (name: string) => void;
+  availableDefinitions?: string[];
+  /** A definition loaded for editing — folded into the draft when it arrives. */
+  loadedDefinition?: LoadedDefinition;
 }
 
-export function BuilderPanel({ onClose, onSave, canSave, saveResult }: BuilderPanelProps) {
+export function BuilderPanel({
+  onClose,
+  onSave,
+  canSave,
+  saveResult,
+  onListDefinitions,
+  onLoadDefinition,
+  availableDefinitions,
+  loadedDefinition,
+}: BuilderPanelProps) {
   const b = useBuilder();
+
+  // Ask for the saved-definition list once, when a load affordance is wired.
+  useEffect(() => {
+    onListDefinitions?.();
+  }, [onListDefinitions]);
+
+  // When a definition is loaded from disk, fold its raw files into the draft
+  // (round-trip-safe: draftFromManifest carries the gateway pin, version, extra
+  // providers, etc.). Guard on identity so we apply each load exactly once.
+  const appliedRef = useRef<LoadedDefinition | undefined>(undefined);
+  useEffect(() => {
+    if (loadedDefinition && loadedDefinition !== appliedRef.current) {
+      appliedRef.current = loadedDefinition;
+      b.load(draftFromManifest(loadedDefinition.manifest, loadedDefinition.policy, loadedDefinition.systemPrompt));
+    }
+  }, [loadedDefinition, b]);
 
   return (
     <div className="builder" role="region" aria-label="Harness builder">
       <header className="builder-head">
         <h1>Build a harness</h1>
-        {onClose ? (
-          <button type="button" className="builder-back" onClick={onClose}>
-            Back to chat
-          </button>
-        ) : null}
+        <div className="builder-head-right">
+          {onLoadDefinition && availableDefinitions && availableDefinitions.length > 0 ? (
+            <label className="builder-load">
+              <span className="builder-load-label">Open</span>
+              <select
+                aria-label="Open a saved definition"
+                defaultValue=""
+                onChange={(e) => {
+                  if (e.target.value) onLoadDefinition(e.target.value);
+                }}
+              >
+                <option value="" disabled>
+                  saved definition…
+                </option>
+                {availableDefinitions.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {onClose ? (
+            <button type="button" className="builder-back" onClick={onClose}>
+              Back to chat
+            </button>
+          ) : null}
+        </div>
       </header>
 
       <div className="builder-grid">

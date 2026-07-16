@@ -111,3 +111,42 @@ test("no save affordance when onSave is not provided", () => {
   render(<BuilderPanel />);
   expect(screen.queryByText("Save & verify")).toBeNull();
 });
+
+test("requests the saved-definition list on mount and loads the chosen one", () => {
+  let listed = 0;
+  const loads: string[] = [];
+  render(
+    <BuilderPanel
+      onListDefinitions={() => (listed += 1)}
+      onLoadDefinition={(n) => loads.push(n)}
+      availableDefinitions={["acme", "meridian"]}
+    />,
+  );
+  expect(listed).toBe(1); // asked for the list on mount
+  fireEvent.change(screen.getByLabelText("Open a saved definition"), { target: { value: "meridian" } });
+  expect(loads).toEqual(["meridian"]);
+});
+
+test("a loadedDefinition is folded into the draft (round-trip preserves the gateway pin)", () => {
+  const loadedDefinition = {
+    name: "acme",
+    manifest: {
+      name: "acme",
+      version: "2.0.0",
+      branding: { displayName: "Acme", accent: "#4F46E5" },
+      systemPrompt: "system-prompt.md",
+      skills: [],
+      providers: { default: { provider: "anthropic", model: "claude-sonnet-5", credentialProfile: "work" } },
+      gateway: { url: "https://gw.acme/mcp", pubkey: "PINNED", tools: ["github__list_issues"] },
+    },
+    policy: { default: "deny", rules: [{ match: "mcp__gateway__github__list_issues", action: "allow" }] },
+    systemPrompt: "You are Acme.",
+  };
+  render(<BuilderPanel onLoadDefinition={() => {}} availableDefinitions={["acme"]} loadedDefinition={loadedDefinition} />);
+  // The form reflects the loaded values, and the live harness.json preview keeps
+  // the gateway pin + version (the round-trip fix, exercised through the UI).
+  expect((screen.getByLabelText("Display name") as HTMLInputElement).value).toBe("Acme");
+  const manifest = screen.getByLabelText("harness.json preview");
+  expect(manifest.textContent).toContain('"pubkey": "PINNED"');
+  expect(manifest.textContent).toContain('"version": "2.0.0"');
+});

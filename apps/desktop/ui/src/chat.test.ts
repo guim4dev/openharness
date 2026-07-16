@@ -228,6 +228,30 @@ describe("chatReducer", () => {
       problems: [{ level: "warn", code: "mcp-server-unpinned", message: "pin it" }],
     });
   });
+
+  test("definitions_listed populates the available list", () => {
+    const state = feed(initialChatState, { type: "definitions_listed", names: ["acme", "meridian"] });
+    expect(state.availableDefinitions).toEqual(["acme", "meridian"]);
+  });
+
+  test("definition_loaded stashes the raw files; an error payload is ignored", () => {
+    const ok = feed(initialChatState, {
+      type: "definition_loaded",
+      name: "acme",
+      manifest: { name: "acme" },
+      policy: { default: "deny", rules: [] },
+      systemPrompt: "hi",
+    });
+    expect(ok.loadedDefinition).toEqual({
+      name: "acme",
+      manifest: { name: "acme" },
+      policy: { default: "deny", rules: [] },
+      systemPrompt: "hi",
+    });
+    // An error load leaves the current draft alone (no loadedDefinition set).
+    const err = feed(initialChatState, { type: "definition_loaded", name: "gone", error: "not found" });
+    expect(err.loadedDefinition).toBeUndefined();
+  });
 });
 
 /** Minimal synchronous WebSocket stand-in the hook drives during the test. */

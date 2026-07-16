@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { saveDefinition } from "./sidecar.ts";
+import { listDefinitions, loadDefinitionForEdit, saveDefinition } from "./sidecar.ts";
 
 let base: string;
 beforeEach(async () => {
@@ -56,4 +56,23 @@ test("an invalid manifest fails closed with an error and no clean save", async (
   const result = await saveDefinition({ name: "broken", manifest: bad, systemPrompt: "hi" }, { baseDir: base });
   expect(result.ok).toBe(false);
   expect(result.error).toMatch(/manifest is invalid/);
+});
+
+test("save → list → load round-trips a definition back into an editable payload", async () => {
+  await saveDefinition({ name: "acme-assistant", manifest, policy, systemPrompt: "You are governed." }, { baseDir: base });
+  expect(listDefinitions(base)).toContain("acme-assistant");
+
+  const loaded = loadDefinitionForEdit(base, "acme-assistant");
+  expect((loaded.manifest as { name: string }).name).toBe("acme-assistant");
+  expect((loaded.policy as { default: string }).default).toBe("deny");
+  expect(loaded.systemPrompt).toContain("You are governed.");
+});
+
+test("listDefinitions is empty for a missing dir and ignores non-definition subdirs", async () => {
+  expect(listDefinitions(join(base, "does-not-exist"))).toEqual([]);
+});
+
+test("loadDefinitionForEdit sanitizes the name (no traversal) and rejects an empty one", () => {
+  // '../../evil' collapses to 'evil' — strictly under base (which won't exist → throws on read).
+  expect(() => loadDefinitionForEdit(base, "!!!")).toThrow(/invalid definition name/);
 });

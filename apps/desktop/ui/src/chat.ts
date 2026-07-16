@@ -40,7 +40,18 @@ export type ServerMessage =
    * Result of a visual-builder `save_definition`: the directory written, whether
    * `doctor` passed (`ok`), its `problems`, and an `error` on a write failure.
    */
-  | { type: "definition_saved"; ok: boolean; dir: string; problems: SaveProblem[]; error?: string };
+  | { type: "definition_saved"; ok: boolean; dir: string; problems: SaveProblem[]; error?: string }
+  /** The names of saved definitions (response to `list_definitions`). */
+  | { type: "definitions_listed"; names: string[] }
+  /** A saved definition's raw files to reopen in the builder (or an `error`). */
+  | { type: "definition_loaded"; name: string; manifest?: unknown; policy?: unknown; systemPrompt?: string; error?: string };
+
+export interface LoadedDefinition {
+  name: string;
+  manifest: Record<string, unknown>;
+  policy?: Record<string, unknown>;
+  systemPrompt: string;
+}
 
 export interface SaveProblem {
   level: "error" | "warn";
@@ -110,6 +121,10 @@ export interface ChatState {
   setup?: SetupState;
   /** The most recent visual-builder save outcome (from `definition_saved`). */
   saveResult?: SaveResult;
+  /** Names of saved definitions the builder can reopen (from `definitions_listed`). */
+  availableDefinitions?: string[];
+  /** The definition most recently loaded for editing (from `definition_loaded`). */
+  loadedDefinition?: LoadedDefinition;
 }
 
 export type ChatAction =
@@ -269,6 +284,25 @@ function applyServerEvent(state: ChatState, event: ServerMessage): ChatState {
       const { type: _t, ...result } = event;
       return { ...state, saveResult: result };
     }
+
+    case "definitions_listed":
+      return { ...state, availableDefinitions: event.names };
+
+    case "definition_loaded": {
+      // A saved definition's raw files came back for editing. Ignore an error
+      // payload (the panel keeps its current draft); otherwise stash it for the
+      // builder to fold in via draftFromManifest.
+      if (event.error || !event.manifest) return state;
+      return {
+        ...state,
+        loadedDefinition: {
+          name: event.name,
+          manifest: event.manifest as Record<string, unknown>,
+          ...(event.policy ? { policy: event.policy as Record<string, unknown> } : {}),
+          systemPrompt: event.systemPrompt ?? "",
+        },
+      };
+    }
   }
 }
 
@@ -336,6 +370,12 @@ export interface UseChat {
   saveDefinition: (input: { name: string; manifest: unknown; policy?: unknown; systemPrompt: string }) => void;
   /** The most recent save outcome, once a `definition_saved` frame has arrived. */
   saveResult?: SaveResult;
+  /** Request the list of saved definitions (populates `availableDefinitions`). */
+  listDefinitions: () => void;
+  /** Load a saved definition back into the builder (populates `loadedDefinition`). */
+  loadDefinition: (name: string) => void;
+  availableDefinitions?: string[];
+  loadedDefinition?: LoadedDefinition;
 }
 
 /**
@@ -401,6 +441,18 @@ export function useChat(connection: Connection | null): UseChat {
     [],
   );
 
+  const listDefinitions = useCallback(() => {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    socket.send(JSON.stringify({ type: "list_definitions" }));
+  }, []);
+
+  const loadDefinition = useCallback((name: string) => {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    socket.send(JSON.stringify({ type: "load_definition", name }));
+  }, []);
+
   const answerAsk = useCallback((id: string, approved: boolean) => {
     // No-op if `id` is not the currently-surfaced ask (stale, already settled,
     // or cancelled by the server): never dequeue or answer the wrong ask.
@@ -423,9 +475,13 @@ export function useChat(connection: Connection | null): UseChat {
     answerAsk,
     submitCredential,
     saveDefinition,
+    listDefinitions,
+    loadDefinition,
     ...(state.integrityMessage !== undefined ? { integrityMessage: state.integrityMessage } : {}),
     ...(head !== undefined ? { pendingAsk: head } : {}),
     ...(state.setup !== undefined ? { setup: state.setup } : {}),
     ...(state.saveResult !== undefined ? { saveResult: state.saveResult } : {}),
+    ...(state.availableDefinitions !== undefined ? { availableDefinitions: state.availableDefinitions } : {}),
+    ...(state.loadedDefinition !== undefined ? { loadedDefinition: state.loadedDefinition } : {}),
   };
 }
