@@ -1,0 +1,26 @@
+{
+  "name": "acme-gateway",
+  "version": "0.1.0",
+  "branding": { "displayName": "Acme Governed Assistant", "accent": "#4F46E5" },
+  "systemPrompt": "system-prompt.md",
+  "skills": [{ "path": "skills/triage", "mandatory": true }],
+  "providers": {
+    "default": { "provider": "anthropic", "model": "claude-sonnet-5", "credentialProfile": "work" }
+  },
+  "gateway": {
+    "url": "https://gateway.acme.internal/mcp",
+    "pubkey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAFQJ9HetO5tyc1JadrddCPIMSIdWt055+KiTWY/Lc5r0=\n-----END PUBLIC KEY-----\n",
+    "tools": ["github__list_issues"]
+  },
+  "mcp": {
+    "servers": {
+      "docs": {
+        "transport": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem@2025.9.0", "/srv/acme/docs"],
+        "mandatory": false,
+        "tools": ["read_file", "list_directory"]
+      }
+    }
+  }
+}

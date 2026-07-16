@@ -1,0 +1,12 @@
+{
+  "default": "deny",
+  "rules": [
+    {
+      "match": "mcp__gateway__github__list_issues",
+      "action": "allow",
+      "reason": "Read-only issue triage, executed server-side by the governed gateway (the org credential + egress never touch this machine)."
+    },
+    { "match": "mcp__docs__read_file", "action": "allow", "reason": "Read local runbooks." },
+    { "match": "mcp__docs__list_directory", "action": "allow", "reason": "Browse local runbooks." }
+  ]
+}
