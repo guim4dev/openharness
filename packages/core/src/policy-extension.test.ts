@@ -168,6 +168,29 @@ test("tool_call arg redaction FAILS CLOSED (denies) when compute throws on patho
   expect(entries[0]).toMatchObject({ type: "tool_call", tool: "any_tool", decision: "deny" });
 });
 
+test("a PARAMETERIZED deny rule fires on pathologically-deep args — the tool is blocked, not fail-open", async () => {
+  const { sink, entries } = recordingSink();
+  // The realistic shape: deny destructive DB writes via a parameterized rule.
+  const p: Policy = { default: "allow", rules: [{ match: "mcp__db__write_query(*DROP*)", action: "deny", reason: "no drops" }] };
+  const handlers = await handlersOf(p, sink);
+  const handler = handlers.get("tool_call");
+
+  // A model emits a shallow malicious query plus a tens-of-thousands-deep junk
+  // field designed to overflow the matcher's recursive walk. The deny must still
+  // fire (bounded walk) rather than the hook throwing and letting the tool run.
+  let deep: unknown = "x";
+  for (let i = 0; i < 60_000; i++) deep = [deep];
+  const input = { query: "DROP TABLE users", junk: deep };
+
+  const res = (await handler!(
+    { type: "tool_call", toolName: "mcp__db__write_query", input },
+    { hasUI: false },
+  )) as { block?: boolean } | undefined;
+
+  expect(res?.block).toBe(true);
+  expect(entries.some((e) => (e as { decision?: string }).decision === "deny")).toBe(true);
+});
+
 test("tool_call arg redaction FAILS CLOSED on pathological args even under a DENY policy (audit hash compute never bypasses the block)", async () => {
   const denyPolicy: Policy = {
     default: "allow",

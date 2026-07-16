@@ -20,15 +20,28 @@ function bashCommandString(args: unknown): string {
  * fail-SAFE surface the parameterized arg-glob matches against — a sensitive
  * substring in ANY field (however deeply nested) makes the rule fire.
  */
+/**
+ * Depth cap on the recursive walk. Pathological nesting (a model can emit
+ * JSON-parseable args tens of thousands of levels deep) would otherwise overflow
+ * the stack and THROW out of the matcher — and a matcher that throws instead of
+ * returning would fail OPEN in the enforcement hook (the tool runs unblocked).
+ * Capping keeps the matcher total: strings at or above the cap are still
+ * captured (so a sensitive substring in a realistic field still fires the rule),
+ * and nesting past it is simply not descended. 256 is far beyond any real tool's
+ * argument nesting and far below the stack limit.
+ */
+const MAX_ARG_DEPTH = 256;
+
 function canonicalArgString(args: unknown): string {
   const parts: string[] = [];
-  const walk = (v: unknown): void => {
+  const walk = (v: unknown, depth: number): void => {
     if (typeof v === "string") parts.push(v);
-    else if (Array.isArray(v)) for (const x of v) walk(x);
+    else if (depth >= MAX_ARG_DEPTH) return; // don't descend into pathological nesting
+    else if (Array.isArray(v)) for (const x of v) walk(x, depth + 1);
     else if (v !== null && typeof v === "object")
-      for (const x of Object.values(v as Record<string, unknown>)) walk(x);
+      for (const x of Object.values(v as Record<string, unknown>)) walk(x, depth + 1);
   };
-  walk(args);
+  walk(args, 0);
   return parts.join("\n");
 }
 

@@ -141,22 +141,34 @@ export function buildPolicyExtension(
     name: "openharness-policy",
     factory: (pi) => {
       pi.on("tool_call", async (event, ctx) => {
-        const { decision, reason } = decideTool(policy, event.toolName, event.input);
+        // Decision + rule-id are derived from attacker-influenced `event.input`
+        // and WALK it (parameterized rules match against a canonical arg string),
+        // so they can throw on pathological input. Compute them fail-CLOSED: a
+        // throw here would otherwise abort the hook before any `return`, and Pi's
+        // runner treats a throwing hook as "no result" — the tool would run
+        // UNBLOCKED and unredacted. Any throw therefore forces a deny.
+        let decision: "allow" | "deny" | "ask" = "deny";
+        let reason: string | undefined;
+        let ruleId: string | undefined;
+        let decisionComputeFailed = false;
+        try {
+          const evaluated = decideTool(policy, event.toolName, event.input);
+          decision = evaluated.decision;
+          reason = evaluated.reason;
+          ruleId = matchedRuleId(policy, event.toolName, event.input);
+        } catch (e) {
+          decisionComputeFailed = true;
+          log(
+            `[openharness/policy] policy decision compute failed for tool_call "${event.toolName}", failing closed: ${String(e)}`,
+          );
+        }
 
         // Fingerprint the REDACTED args (never the raw args) so a secret in an
         // argument can never be recovered from the audit log — recorded even for
-        // denials, which block before the tool ever runs.
-        //
-        // Computed defensively, ONCE, up front: `applyRedactors`/`hashCanonical`
-        // can throw on pathological `event.input` (circular refs, non-JSON-
-        // serializable values). If that throw escaped, it would abort this hook
-        // BEFORE any `return` — Pi's runner treats a throwing hook as "no
-        // result", i.e. the tool call proceeds UNBLOCKED with the original,
-        // unredacted input. A throw here therefore fails closed unconditionally
-        // (denying the call) rather than falling through to whatever `decision`
-        // would otherwise have allowed.
+        // denials, which block before the tool ever runs. Computed defensively:
+        // `applyRedactors`/`hashCanonical` can throw on pathological `event.input`
+        // (circular refs, non-JSON-serializable values); a throw fails closed.
         const server = parseMcpServer(event.toolName);
-        const ruleId = matchedRuleId(policy, event.toolName, event.input);
         let argsHash: string;
         let redactionComputeFailed = false;
         try {
@@ -178,6 +190,14 @@ export function buildPolicyExtension(
             argsHash,
           });
         };
+
+        if (decisionComputeFailed) {
+          recordDecision("deny");
+          return {
+            block: true,
+            reason: `Blocked by policy: evaluating tool "${event.toolName}" against the policy failed (e.g. pathological arguments); failing closed.`,
+          };
+        }
 
         if (redactionComputeFailed) {
           recordDecision("deny");

@@ -45,6 +45,19 @@ describe("matchToolIdentity — parameterized arg-matching on non-bash tools (ga
     expect(matchToolIdentity("mcp__x__y(*SECRET*)", "mcp__x__y", { a: { b: { c: "has a secret inside" } } })).toBe(true);
   });
 
+  test("stays TOTAL on pathologically-deep args (no stack overflow) so the deny is never bypassed", () => {
+    // A model can emit JSON args nested tens of thousands deep; an unbounded
+    // recursive walk would throw a RangeError out of the matcher, and a matcher
+    // that throws fails OPEN in the enforcement hook. The walk is depth-bounded,
+    // so it returns normally and the shallow malicious keyword still fires.
+    let deep: unknown = "buried";
+    for (let i = 0; i < 60_000; i++) deep = [deep];
+    const args = { sql: "DROP TABLE users", junk: deep };
+    expect(matchToolIdentity("mcp__db__query(*DROP*)", "mcp__db__query", args)).toBe(true);
+    const p = policy({ default: "allow", rules: [{ match: "mcp__db__query(*DROP*)", action: "deny", reason: "no drops" }] });
+    expect(decideTool(p, "mcp__db__query", args).decision).toBe("deny");
+  });
+
   test("does NOT match a benign call whose args contain no keyword", () => {
     expect(matchToolIdentity("mcp__db__query(*DELETE*)", "mcp__db__query", { sql: "SELECT * FROM orders" })).toBe(false);
     expect(matchToolIdentity("mcp__db__query(*DROP*)", "mcp__db__query", { sql: "INSERT INTO orders VALUES (1)" })).toBe(false);
