@@ -33,6 +33,8 @@ export { createDpopFetch, dpopFromHttp, dpopHeaders, proofUrl, SERVER_AUTH_HEADE
 export type { FetchLike } from "./dpop-http.ts";
 export { startGatewayHttp } from "./http.ts";
 export type { GatewayHttpOptions, GatewayHttpServer } from "./http.ts";
+export { exchangeToken } from "./token-exchange.ts";
+export type { IdpVerifier, TokenExchangeRequest, ExchangedToken } from "./token-exchange.ts";
 export { loadGatewayServerConfig, gatewayServerConfigSchema } from "./config.ts";
 export type { GatewayServerConfig, ResolvedGatewayServerConfig } from "./config.ts";
 export { startGatewayFromConfig } from "./serve.ts";

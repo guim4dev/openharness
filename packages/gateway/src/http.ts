@@ -4,6 +4,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { createReplayGuard, isDeny, signServerAuth } from "./auth.ts";
 import { dpopFromHttp, SERVER_AUTH_HEADER } from "./dpop-http.ts";
 import { createGateway, type GatewayPipeline } from "./server.ts";
+import { exchangeToken, type IdpVerifier } from "./token-exchange.ts";
 import type { ToolSpec } from "./catalog.ts";
 
 /**
@@ -34,6 +35,17 @@ export interface GatewayHttpOptions {
   port?: number;
   /** MCP endpoint path (default "/mcp"). */
   path?: string;
+  /**
+   * IdP verifier for the OAuth 2.1 token-exchange endpoint. When set (with the
+   * private key), `POST <tokenPath>` exchanges an IdP subject token for a
+   * DPoP-bound gateway token (deploy hardening §3). Omit for the dev path where
+   * tokens are minted out of band.
+   */
+  idp?: IdpVerifier;
+  /** Token-exchange endpoint path (default "/token"). */
+  tokenPath?: string;
+  /** Minted-token lifetime in ms (default 5 min). */
+  tokenTtlMs?: number;
   /** Where non-fatal errors (request failures, cleanup failures) are logged. Default: console.error. */
   logger?: (message: string, err?: unknown) => void;
 }
@@ -59,6 +71,7 @@ function serverError(res: ServerResponse): void {
 
 export async function startGatewayHttp(opts: GatewayHttpOptions): Promise<GatewayHttpServer> {
   const path = opts.path ?? "/mcp";
+  const tokenPath = opts.tokenPath ?? "/token";
   const host = opts.host ?? "127.0.0.1";
   const log = opts.logger ?? ((m: string, err?: unknown) => console.error(`[openharness/gateway] ${m}`, err ?? ""));
   // One replay guard for the server: a DPoP proof id authenticates exactly one
@@ -75,8 +88,41 @@ export async function startGatewayHttp(opts: GatewayHttpOptions): Promise<Gatewa
     });
   });
 
+  const hdr = (h: Record<string, string | undefined>, k: string): string | undefined => h[k] ?? h[k.toLowerCase()];
+
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = req.url ?? "/";
+
+    // 0. Token exchange (deploy hardening §3): NOT DPoP-authenticated — it is the
+    //    bootstrap that ISSUES the DPoP-bound token, gated instead by the IdP
+    //    subject token. Only mounted when an IdP verifier + signing key are set.
+    if ((req.method ?? "").toUpperCase() === "POST" && url.startsWith(tokenPath) && opts.idp && opts.gatewayPrivateKeyPem) {
+      const h = req.headers as Record<string, string | undefined>;
+      const auth = hdr(h, "authorization");
+      const subjectToken = auth?.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
+      const keyB64 = hdr(h, "x-oh-dpop-key");
+      const clientPublicKeyPem = keyB64 ? Buffer.from(keyB64, "base64url").toString() : "";
+      const result = await exchangeToken(
+        {
+          subjectToken,
+          clientPublicKeyPem,
+          harnessId: hdr(h, "x-oh-harness") ?? "",
+          defVersion: hdr(h, "x-oh-defversion") ?? "",
+          sessionId: hdr(h, "x-oh-session") ?? "",
+        },
+        { idp: opts.idp, gatewayPrivateKeyPem: opts.gatewayPrivateKeyPem, ttlMs: opts.tokenTtlMs ?? 300_000, now: Date.now() },
+      );
+      if ("deny" in result) {
+        unauthorized(res);
+        return;
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({ access_token: result.token, token_type: "DPoP", expires_in: Math.floor(result.expiresInMs / 1000) }),
+      );
+      return;
+    }
+
     if (!url.startsWith(path)) {
       res.writeHead(404).end();
       return;
