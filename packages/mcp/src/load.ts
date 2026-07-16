@@ -1,6 +1,6 @@
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { HarnessDefinition } from "@openharness/definition";
-import { mcpToolToPiTool } from "./bridge.ts";
+import { isSafeMcpToolName, mcpToolToPiTool } from "./bridge.ts";
 import { connectMcpServer } from "./connect.ts";
 import { McpConnectionError } from "./errors.ts";
 import type { ConnectFn, McpConnection, SecretResolver } from "./types.ts";
@@ -87,6 +87,15 @@ export async function loadMcpTools(
     const callTool = conn.callTool.bind(conn);
     for (const mcpTool of mcpTools) {
       if (allow && !allow.includes(mcpTool.name)) continue;
+      // An untrusted server could return a tool name with whitespace, control/
+      // RTL chars, or absurd length; bridged verbatim it poisons the ENTIRE tool
+      // list the provider sees (400s → harness unusable) and spoofs UIs. Skip it.
+      if (!isSafeMcpToolName(mcpTool.name)) {
+        log(
+          `[openharness/mcp] server '${serverName}' offered a tool with an unsafe name (${JSON.stringify(mcpTool.name)}) — skipping it.`,
+        );
+        continue;
+      }
       tools.push(mcpToolToPiTool(serverName, mcpTool, callTool));
     }
   }

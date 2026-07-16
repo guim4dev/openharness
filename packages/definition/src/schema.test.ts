@@ -95,6 +95,15 @@ test("rejects a gateway missing url or pubkey", () => {
   ).toThrow();
 });
 
+test("rejects an mcp server NAME containing '__' but allows a single underscore", () => {
+  // `__` would break the injective `mcp__<server>__<tool>` bridged-name mapping.
+  const bad = { ...valid, mcp: { servers: { "a__b": { transport: "stdio", command: "x" } } } };
+  expect(() => harnessManifestSchema.parse(bad)).toThrow(/__|server name/i);
+  // A single underscore (e.g. `back_office`) is fine.
+  const ok = { ...valid, mcp: { servers: { back_office: { transport: "stdio", command: "x" } } } };
+  expect(harnessManifestSchema.parse(ok).mcp?.servers.back_office.command).toBe("x");
+});
+
 test("rejects an stdio server missing command", () => {
   const bad = { ...valid, mcp: { servers: { local: { transport: "stdio" } } } };
   expect(() => harnessManifestSchema.parse(bad)).toThrow(/command/);

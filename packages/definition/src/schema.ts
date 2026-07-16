@@ -55,7 +55,23 @@ export const harnessManifestSchema: z.ZodType<HarnessManifest, z.ZodTypeDef, unk
   promptLibrary: z.string().min(1).optional(),
   skills: z.array(z.object({ path: z.string().min(1), mandatory: z.boolean() })).default([]),
   providers: z.object({ default: providerConfig }).catchall(providerConfig),
-  mcp: z.object({ servers: z.record(mcpServerSpec) }).optional(),
+  mcp: z
+    .object({
+      // Server NAMES must not contain `__`: a tool bridges as `mcp__<server>__<tool>`,
+      // so `a__b` + tool `c` and `a` + tool `b__c` would both become `mcp__a__b__c`
+      // — one server could then shadow another's tool and dodge a policy rule.
+      // Restricting the key keeps that mapping injective.
+      servers: z.record(
+        z
+          .string()
+          .regex(
+            /^(?!.*__)[A-Za-z0-9._-]+$/,
+            "mcp server name must be [A-Za-z0-9._-] and contain no '__' (it namespaces bridged tools as mcp__<server>__<tool>)",
+          ),
+        mcpServerSpec,
+      ),
+    })
+    .optional(),
   gateway: z
     .object({
       url: z.string().min(1),
