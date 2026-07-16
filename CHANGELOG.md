@@ -90,9 +90,11 @@ governed and signed, to a TUI and a desktop app. 405 tests, MIT, built on
   in the config. Deploy hardening (real IdP/token-exchange, KMS-backed broker,
   containerized connector sandbox) remains.
 - **Example harnesses** — `acme-fintech` (deny-by-default, AWS-key redaction),
-  `northwind-ops` (ask-on-writes, PII redaction), and `meridian-support` (the
+  `northwind-ops` (ask-on-writes, PII redaction), `meridian-support` (the
   non-technical desktop operator: `bash` denied, ask-on-every-write, heavy PII
-  redaction — the example that exercises the desktop approval modal).
+  redaction — the example that exercises the desktop approval modal), and
+  `acme-gateway` (the v2 moat: a remote `gateway` with a pinned pubkey + a
+  version-pinned local MCP server + deny-by-default governed egress).
 - **`openharness doctor`** — preflight a definition without building it: on top
   of the loader's structural/reference validation it flags self-consistency
   traps (a model the harness's own policy denies, a missing branding icon, an
