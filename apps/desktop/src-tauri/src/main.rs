@@ -52,10 +52,65 @@ struct SidecarPaths {
     dev_harness: Option<PathBuf>,
 }
 
+/// Resolve the Node.js executable. Apps launched from Finder, Spotlight, or a
+/// DMG get launchd's bare PATH (/usr/bin:/bin:/usr/sbin:/sbin), which misses
+/// user installs (nvm, Homebrew, volta, asdf). Probe PATH first, then
+/// well-known locations; override with OH_NODE_PATH.
+fn resolve_node() -> PathBuf {
+    if let Ok(path) = std::env::var("OH_NODE_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(paths) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&paths) {
+            let candidate = dir.join("node");
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+    }
+    let mut candidates: Vec<PathBuf> = vec![
+        "/opt/homebrew/bin/node".into(),
+        "/usr/local/bin/node".into(),
+        "/usr/bin/node".into(),
+    ];
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        // nvm: prefer the newest installed version
+        if let Ok(entries) = std::fs::read_dir(home.join(".nvm/versions/node")) {
+            let mut versions: Vec<(Vec<u32>, PathBuf)> = entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.join("bin/node").is_file())
+                .filter_map(|p| {
+                    let version = p
+                        .file_name()?
+                        .to_str()?
+                        .trim_start_matches('v')
+                        .split('.')
+                        .map(|n| n.parse::<u32>().unwrap_or(0))
+                        .collect::<Vec<u32>>();
+                    Some((version, p))
+                })
+                .collect();
+            versions.sort();
+            if let Some((_, newest)) = versions.pop() {
+                candidates.push(newest.join("bin/node"));
+            }
+        }
+        candidates.push(home.join(".volta/bin/node"));
+        candidates.push(home.join(".asdf/shims/node"));
+    }
+    candidates
+        .into_iter()
+        .find(|p| p.is_file())
+        .unwrap_or_else(|| PathBuf::from("node"))
+}
+
 /// Spawn the Node sidecar. Cross-platform: invokes the real `node` binary
 /// (not a shell shim), so no `cmd /C` / `.cmd` handling is needed. A `.ts`
 /// entry is run through the `tsx` loader (dev); a prebuilt `.mjs`/`.js` runs on
 /// bare `node` (release). Every default is overridable via env:
+///   OH_NODE_PATH      explicit node binary (default: probe PATH, then
+///                     Homebrew / /usr/local, then nvm/volta/asdf locations)
 ///   OH_SIDECAR_ENTRY    sidecar entry (default: dev .ts source / release server.mjs)
 ///   OH_HARNESS_PATH     dev-boot harness dir (debug default: harnesses/example)
 ///   OH_BUNDLE_PATH      signed bundle for verified boot (release default: resources)
@@ -73,7 +128,7 @@ fn spawn_sidecar(app_id: &str, paths: &SidecarPaths) -> std::io::Result<Child> {
         .map(PathBuf::from)
         .unwrap_or_else(|_| paths.default_entry.clone());
 
-    let mut cmd = Command::new("node");
+    let mut cmd = Command::new(resolve_node());
     if entry.extension().and_then(|e| e.to_str()) == Some("ts") {
         cmd.arg("--import").arg("tsx");
     }
@@ -185,7 +240,15 @@ fn main() {
         };
         #[cfg(not(debug_assertions))]
         let paths = {
-            let res = app.path().resource_dir()?;
+            // Resolve the bundled Resources dir from the exe path directly
+            // instead of `app.path().resource_dir()`: tauri's resolver refuses
+            // to run when any ancestor of the exe path is a symlink (e.g.
+            // /tmp -> /private/tmp on macOS), which crashed the app at launch
+            // from temp dirs.
+            let res = std::env::current_exe()?
+                .parent()
+                .ok_or("failed to resolve the exe directory")?
+                .join("../Resources");
             SidecarPaths {
                 default_entry: res.join("server.mjs"),
                 verified: Some((res.join("harness.ohbundle"), res.join("org.pub"))),
@@ -196,7 +259,7 @@ fn main() {
         };
 
         let mut child = spawn_sidecar(&app_id, &paths)
-            .map_err(|e| format!("failed to spawn Node sidecar (is `node` on PATH?): {e}"))?;
+            .map_err(|e| format!("failed to spawn Node sidecar (set OH_NODE_PATH to your Node.js binary): {e}"))?;
 
         let stdout = child
             .stdout
