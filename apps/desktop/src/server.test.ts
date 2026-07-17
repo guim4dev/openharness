@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, readFileSync, cpSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { generateKeypair, bundleDefinition, writeBundle } from "@openharness/bundle";
 
@@ -211,6 +211,46 @@ test(
       // Proven: no session ever started under the stale floor.
       expect(frames.some((f) => f.type === "token")).toBe(false);
       expect(frames.some((f) => f.type === "done")).toBe(false);
+    } finally {
+      kill();
+    }
+  },
+  210_000,
+);
+
+test(
+  "resolvePinnedBundle at boot: a newer signed update in the updates dir is booted over the baked bundle",
+  async () => {
+    // Sign the example at TWO versions with ONE org key: baked 0.1.0 + a pulled
+    // update 0.3.0 dropped into <configDir>/updates (where `openharness update`
+    // writes). With OH_MIN_VERSION=0.3.0, booting the baked 0.1.0 would be an
+    // integrity refusal — so a clean boot PROVES server.ts resolved + booted the
+    // 0.3.0 update (i.e. resolvePinnedBundle is wired at boot, not dead code).
+    const { publicKey, privateKey } = generateKeypair();
+    const bakedPath = join(tmp, "baked.ohbundle");
+    writeBundle(bundleDefinition(exampleHarness, privateKey), bakedPath); // 0.1.0
+    const pubkeyPath = join(tmp, "org.pub.pem");
+    writeFileSync(pubkeyPath, publicKey);
+
+    const copy = join(tmp, "example-0.3.0");
+    cpSync(exampleHarness, copy, { recursive: true });
+    const hp = join(copy, "harness.json");
+    const m = JSON.parse(readFileSync(hp, "utf8")) as { version: string };
+    m.version = "0.3.0";
+    writeFileSync(hp, JSON.stringify(m, null, 2));
+    const updatesDir = join(tmp, "config", "updates");
+    mkdirSync(updatesDir, { recursive: true });
+    writeBundle(bundleDefinition(copy, privateKey), join(updatesDir, "example-0.3.0.ohbundle"));
+
+    const { handshake, kill } = await bootServerTs({
+      OH_BUNDLE_PATH: bakedPath,
+      OH_ORG_PUBKEY_PATH: pubkeyPath,
+      OH_MIN_VERSION: "0.3.0", // baked 0.1.0 alone would be refused; the update satisfies it
+    });
+    try {
+      const url = `ws://127.0.0.1:${handshake.port}?token=${encodeURIComponent(handshake.token)}`;
+      const frames = await collectFrames(url, 1000);
+      expect(frames.some((f) => f.type === "integrity_error")).toBe(false); // 0.3.0 update booted
     } finally {
       kill();
     }

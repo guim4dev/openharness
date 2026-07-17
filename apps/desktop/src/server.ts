@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-import { configDir, loadAccounts } from "@openharness/core";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { configDir, loadAccounts, resolvePinnedBundle } from "@openharness/core";
 import { loadHarnessDefinition } from "@openharness/definition";
 import { startSidecar } from "./sidecar.ts";
 import type { StartSidecarOptions } from "./sidecar.ts";
@@ -46,9 +48,33 @@ async function main(): Promise<void> {
   // the sealed min-version.txt resource in release). When present, a validly-
   // signed but OLDER bundle is refused on boot. Optional: absent => no floor.
   const minVersion = process.env.OH_MIN_VERSION?.trim() || undefined;
+
+  // Pick the bundle to boot: the newest bundle that verifies under the org key
+  // at the anti-rollback floor — the baked-in one, OR a newer signed update
+  // pulled by `openharness update` into the updates dir. Without this the pulled
+  // update never takes effect and the persisted floor defends nothing at boot.
+  // A rollback/tampered candidate is refused; if nothing resolves (e.g. the baked
+  // bundle itself doesn't verify), fall back to the baked path so the sidecar
+  // fails loud with the precise reason instead of here.
+  let bootBundlePath = bundlePath;
+  if (bundlePath && pubkeyPath) {
+    const updatesDir = process.env.OH_UPDATES_DIR ?? join(configDir(), "updates");
+    const floorPath = process.env.OH_FLOOR_PATH ?? join(configDir(), "version-floor.txt");
+    try {
+      bootBundlePath = resolvePinnedBundle({
+        bakedBundlePath: bundlePath,
+        updatesDir,
+        pubkeyPem: readFileSync(pubkeyPath, "utf8"),
+        floorPath,
+      }).path;
+    } catch {
+      bootBundlePath = bundlePath;
+    }
+  }
+
   const verified =
     bundlePath && pubkeyPath
-      ? { bundlePath, pubkeyPath, ...(minVersion ? { minVersion } : {}) }
+      ? { bundlePath: bootBundlePath as string, pubkeyPath, ...(minVersion ? { minVersion } : {}) }
       : undefined;
   const harnessPath = process.env.OH_HARNESS_PATH ?? process.argv[2];
 
