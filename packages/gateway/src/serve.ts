@@ -1,6 +1,7 @@
 import { createFileAuditLog } from "@openharness/audit";
 import type { SecretStore } from "@openharness/credentials";
 import { SecretStoreKms, type KmsStore } from "./broker.ts";
+import { PooledKmsStore } from "./broker-pool.ts";
 import { createApprovalQueue } from "./approval.ts";
 import { createConnectorSessions } from "./sessions.ts";
 import { createSandboxedConnectorSessions, type ConnectorDescriptor, type SandboxHost } from "./connector-sandbox.ts";
@@ -96,6 +97,21 @@ export async function startGatewayFromConfig(
       })
     : undefined;
 
+  // Credential broker (deploy hardening §4). An explicit `opts.broker` wins (a
+  // deployment can inject a KMS-backed one); else the config selects a pooled
+  // broker (rotation behind the gateway) drawing each upstream from ordered
+  // `upstream:<ref>` secrets; else the default single-credential store.
+  const configuredBroker: KmsStore | undefined =
+    config.broker?.kind === "pool"
+      ? new PooledKmsStore({
+          upstreams: config.broker.upstreams,
+          resolveRef: async (ref) => {
+            const secret = await opts.secretStore.get(`upstream:${ref}`);
+            return secret !== undefined ? { secret } : undefined;
+          },
+        })
+      : undefined;
+
   return startGatewayHttp({
     catalog: config.catalog,
     gatewayPublicKeyPem: config.gatewayPublicKeyPem,
@@ -110,7 +126,7 @@ export async function startGatewayFromConfig(
     pipeline: {
       policy: config.policy,
       policyVersion: config.policyVersion,
-      broker: opts.broker ?? new SecretStoreKms(opts.secretStore),
+      broker: opts.broker ?? configuredBroker ?? new SecretStoreKms(opts.secretStore),
       sessions: opts.sandbox
         ? createSandboxedConnectorSessions(opts.sandbox)
         : createConnectorSessions(factories),

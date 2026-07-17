@@ -56,6 +56,19 @@ export const gatewayServerConfigSchema = z.object({
       ttlMs: z.number().int().positive().optional(),
     })
     .optional(),
+  /**
+   * Credential broker selection (deploy hardening §4). Omit for the default
+   * single-credential store (`upstream:<id>`). `pool` draws each upstream from an
+   * ordered list of credential refs (each stored `upstream:<ref>`) and rotates
+   * behind the gateway on reported failures.
+   */
+  broker: z
+    .object({
+      kind: z.literal("pool"),
+      /** upstreamId -> ordered credential refs (each stored under `upstream:<ref>`). */
+      upstreams: z.record(z.array(z.string().min(1)).min(1)),
+    })
+    .optional(),
   catalog: z.array(toolSpecSchema).min(1),
   connectors: z.array(connectorSchema).min(1),
 });
@@ -82,6 +95,8 @@ export interface ResolvedGatewayServerConfig {
     tokenPath?: string;
     ttlMs?: number;
   };
+  /** Credential broker selection (pass-through; no file refs to resolve). */
+  broker?: GatewayServerConfig["broker"];
   catalog: GatewayServerConfig["catalog"];
   connectors: GatewayServerConfig["connectors"];
 }
@@ -125,6 +140,7 @@ export function loadGatewayServerConfig(configPath: string): ResolvedGatewayServ
     auditPath: resolve(baseDir, cfg.auditPath),
     ...(cfg.approval ? { approval: cfg.approval } : {}),
     ...(tokenExchange ? { tokenExchange } : {}),
+    ...(cfg.broker ? { broker: cfg.broker } : {}),
     catalog: cfg.catalog,
     connectors: cfg.connectors,
   };

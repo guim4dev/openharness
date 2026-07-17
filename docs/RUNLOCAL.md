@@ -232,11 +232,20 @@ call path (allow audited · no-DPoP refused · deny never reaches upstream · Id
 JWT → token → call) is exercised end to end in
 `packages/gateway/src/{http,serve}.test.ts`.
 
+**Credential pooling + rotation (config).** Add a `broker` block to rotate each
+upstream across an ordered pool of credential refs (each stored `upstream:<ref>`
+via `set-secret`); a rate-limited/auth-failed credential rotates behind the
+gateway on the next call:
+
+```json
+"broker": { "kind": "pool", "upstreams": { "github": ["github-a", "github-b"] } }
+```
+
 > The IdP token-exchange above uses a **static-key** verifier (one configured
 > Ed25519 public key); a JWKS-fetching verifier, the KMS credential broker, and
 > the out-of-process connector sandbox are built as provider-agnostic seams with
-> offline references (see [`ROADMAP.md`](ROADMAP.md)) — wiring the latter two into
-> `serve` via config is next.
+> offline references (see [`ROADMAP.md`](ROADMAP.md)) and wired programmatically —
+> config selectors for the KMS broker + sandbox are the remaining polish.
 
 ## 6. Build a branded desktop app
 

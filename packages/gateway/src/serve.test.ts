@@ -136,6 +136,58 @@ test("the config's policy is authoritative — a denied tool is blocked end to e
   }
 });
 
+test("a config with a POOL broker rotates the upstream credential behind the gateway", async () => {
+  dir = mkdtempSync(join(tmpdir(), "oh-gw-pool-"));
+  const gw = generateAuthKeypair();
+  writeFileSync(join(dir, "gw.pub"), gw.publicKey);
+  writeFileSync(join(dir, "gw.key"), gw.privateKey);
+  writeFileSync(join(dir, "policy.json"), JSON.stringify({ default: "allow", rules: [] }));
+  writeFileSync(
+    join(dir, "gateway.json"),
+    JSON.stringify({
+      host: "127.0.0.1",
+      keys: { publicKey: "gw.pub", privateKey: "gw.key" },
+      policy: "policy.json",
+      policyVersion: "1.0.0",
+      auditPath: "audit.log",
+      broker: { kind: "pool", upstreams: { github: ["gh-a", "gh-b"] } },
+      catalog: [{ name: "github__list_issues", connectorId: "github", upstreamId: "github" }],
+      connectors: [{ id: "github", type: "github-read" }],
+    }),
+  );
+  const resolved = loadGatewayServerConfig(join(dir, "gateway.json"));
+  const store = new InMemorySecretStore();
+  await store.set("upstream:gh-a", "tok-a");
+  await store.set("upstream:gh-b", "tok-b");
+  // A connector that rejects credential gh-a (401) and succeeds on gh-b.
+  const rotating: () => Connector = () => ({
+    id: "github",
+    tools: [{ name: "github__list_issues" }],
+    allowHosts: ["api.github.com"],
+    call: async (_t, _a, cred) => {
+      if (cred.credentialId === "gh-a") throw new Error("github error 401 unauthorized");
+      return { content: [{ type: "text", text: `a bug via ${cred.credentialId}` }] };
+    },
+  });
+  running = await startGatewayFromConfig(resolved, { secretStore: store, connectorFactories: { "github-read": rotating } });
+
+  const mcp1 = await connect(running.url, gw.privateKey, gw.publicKey);
+  try {
+    const r1 = await mcp1.callTool({ name: "github__list_issues", arguments: { owner: "a", repo: "b" } });
+    expect(r1.isError).toBe(true); // gh-a rejected → reported → invalidated
+  } finally {
+    await mcp1.close();
+  }
+  const mcp2 = await connect(running.url, gw.privateKey, gw.publicKey);
+  try {
+    const r2 = await mcp2.callTool({ name: "github__list_issues", arguments: { owner: "a", repo: "b" } });
+    expect(r2.isError).toBeFalsy();
+    expect(JSON.stringify(r2.content)).toContain("a bug via gh-b"); // rotated
+  } finally {
+    await mcp2.close();
+  }
+});
+
 test("a config with tokenExchange exchanges an IdP JWT for a DPoP token that runs a governed call", async () => {
   dir = mkdtempSync(join(tmpdir(), "oh-gw-tx-"));
   const gw = generateAuthKeypair();
