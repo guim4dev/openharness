@@ -255,6 +255,13 @@ The desktop app also runs live in dev (Tauri prerequisites required):
 npm run dev:desktop
 ```
 
+> **The packaged app needs `node` findable.** It launches a Node sidecar, and a
+> GUI app started from Finder/launchd has a MINIMAL PATH (no Homebrew/nvm). The
+> shell probes `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin` and honors
+> `OH_NODE_BIN=/path/to/node`; if `node` still isn't found it opens in a
+> "Not connected" state (rather than crashing). Running the binary from a
+> terminal — where `node` is on PATH — always works.
+
 ## 7. Clean up
 
 ```bash

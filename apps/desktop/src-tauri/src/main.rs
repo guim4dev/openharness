@@ -68,12 +68,49 @@ struct SidecarPaths {
 ///                       their own templated identifier) get isolated config dirs instead
 ///                       of falling back to the shared default (see
 ///                       `packages/core/src/paths.ts::configDir`).
+/// Resolve the `node` binary. A GUI app launched from Finder/launchd inherits a
+/// MINIMAL PATH (`/usr/bin:/bin:/usr/sbin:/sbin`) that does NOT include Homebrew
+/// (`/opt/homebrew/bin`), `/usr/local/bin`, or an nvm dir — so a bare `node`
+/// often isn't found and the sidecar can't spawn. Honor an explicit override,
+/// then probe the common install locations, then fall back to bare `node` (which
+/// works when launched from a terminal that has node on PATH).
+fn resolve_node() -> PathBuf {
+    if let Some(explicit) = std::env::var_os("OH_NODE_BIN") {
+        return PathBuf::from(explicit);
+    }
+    for c in [
+        "/opt/homebrew/bin/node",
+        "/usr/local/bin/node",
+        "/usr/bin/node",
+    ] {
+        let p = PathBuf::from(c);
+        if p.exists() {
+            return p;
+        }
+    }
+    PathBuf::from("node")
+}
+
+/// Prepend the common Node install dirs to PATH for the child, so a `node` that
+/// itself shells out (or a resolved absolute `node`) still finds its neighbors
+/// even under the minimal GUI PATH.
+fn augmented_path() -> String {
+    let existing = std::env::var("PATH").unwrap_or_default();
+    let extra = "/opt/homebrew/bin:/usr/local/bin:/usr/bin";
+    if existing.is_empty() {
+        extra.to_string()
+    } else {
+        format!("{extra}:{existing}")
+    }
+}
+
 fn spawn_sidecar(app_id: &str, paths: &SidecarPaths) -> std::io::Result<Child> {
     let entry = std::env::var("OH_SIDECAR_ENTRY")
         .map(PathBuf::from)
         .unwrap_or_else(|_| paths.default_entry.clone());
 
-    let mut cmd = Command::new("node");
+    let mut cmd = Command::new(resolve_node());
+    cmd.env("PATH", augmented_path());
     if entry.extension().and_then(|e| e.to_str()) == Some("ts") {
         cmd.arg("--import").arg("tsx");
     }
@@ -195,31 +232,48 @@ fn main() {
             }
         };
 
-        let mut child = spawn_sidecar(&app_id, &paths)
-            .map_err(|e| format!("failed to spawn Node sidecar (is `node` on PATH?): {e}"))?;
-
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or("sidecar was spawned without a stdout pipe")?;
-
-        let (handshake, reader) = read_handshake(BufReader::new(stdout));
-
-        // Keep draining stdout so a chatty sidecar never fills the pipe buffer
-        // and blocks. (The handshake has already been consumed.)
-        thread::spawn(move || {
-            let mut reader = reader;
-            let mut line = String::new();
-            loop {
-                line.clear();
-                match reader.read_line(&mut line) {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => eprint!("[sidecar] {line}"),
+        // Spawn the sidecar. A failure here (most often `node` not found under a
+        // GUI app's minimal PATH) must NOT abort the app — returning Err from
+        // setup panics inside the Obj-C `did_finish_launching` callback, which
+        // can't unwind across the C ABI and hard-aborts. Instead, degrade to a
+        // disconnected window (the UI already has a "Not connected" state) so the
+        // user sees an actionable message rather than a crash.
+        let handshake = match spawn_sidecar(&app_id, &paths) {
+            Ok(mut child) => {
+                let taken = child.stdout.take();
+                app.manage(Sidecar(Mutex::new(Some(child))));
+                match taken {
+                    Some(stdout) => {
+                        let (handshake, reader) = read_handshake(BufReader::new(stdout));
+                        // Keep draining stdout so a chatty sidecar never fills the
+                        // pipe buffer and blocks. (The handshake is consumed above.)
+                        thread::spawn(move || {
+                            let mut reader = reader;
+                            let mut line = String::new();
+                            loop {
+                                line.clear();
+                                match reader.read_line(&mut line) {
+                                    Ok(0) | Err(_) => break,
+                                    Ok(_) => eprint!("[sidecar] {line}"),
+                                }
+                            }
+                        });
+                        handshake
+                    }
+                    None => {
+                        eprintln!("[openharness] sidecar spawned without a stdout pipe; starting disconnected");
+                        None
+                    }
                 }
             }
-        });
-
-        app.manage(Sidecar(Mutex::new(Some(child))));
+            Err(e) => {
+                eprintln!(
+                    "[openharness] failed to spawn Node sidecar ({e}); starting disconnected. Is `node` installed? Set OH_NODE_BIN to its path to override."
+                );
+                app.manage(Sidecar(Mutex::new(None)));
+                None
+            }
+        };
 
         // Inject the loopback coords the UI reads from `window.__OPENHARNESS__`
         // before any page script runs. When the handshake was missed, ship no
