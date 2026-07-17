@@ -10,10 +10,16 @@ import { BundleVerificationError, isOlder, verifyBundle, writeBundle, type Bundl
  * fetches the hosted bundle, verifies it under the org public key with the floor
  * as `minVersion` (so a tampered OR older-than-floor bundle is refused), and only
  * an accepted NEWER bundle is written to the updates dir and advances the floor.
- * The floor is monotonic and persisted, so an attacker who later drops an older
- * (but still org-signed) bundle into the updates dir cannot roll the app back —
- * `resolvePinnedBundle` re-verifies every candidate against the same floor at
- * boot and picks the newest that survives, else the baked-in bundle.
+ * The floor is monotonic and persisted. Its DURABLE guarantee is anchored to the
+ * BAKED bundle (shipped inside the signed app): `resolvePinnedBundle` never boots
+ * anything older than the baked version — even with no/deleted/corrupt floor file.
+ * The persisted floor RAISES that bar as updates advance, but it lives in the same
+ * user-writable dir as the updates, so an attacker who can write there can also
+ * delete it, rolling the durable floor down to (never below) the baked version.
+ * `resolvePinnedBundle` re-verifies every candidate against the effective floor at
+ * boot and picks the newest that survives, else the baked-in bundle. (Making the
+ * floor tamper-proof against a same-dir writer — a sealed/keychain-backed floor —
+ * is a separate hardening.)
  *
  * This is the DEFINITION-bundle channel only; app-binary auto-update (the Tauri
  * updater + OS signing) is a separate, later concern.
