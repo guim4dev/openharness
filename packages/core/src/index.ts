@@ -17,8 +17,8 @@ export { checkModel } from "@openharness/policy";
 export type { Policy } from "@openharness/policy";
 export { createFileAuditLog, verifyAuditLog, InMemoryAuditSink, hashCanonical, AUDIT_GENESIS } from "@openharness/audit";
 export type { AuditSink, AuditEntry, AuditRecord, ToolDecision, VerifyResult } from "@openharness/audit";
-export { loadAccounts, persistOnboardedAccount } from "./accounts.ts";
-export type { LoadAccountsOptions, LoadedAccounts, PersistOnboardedAccountOptions } from "./accounts.ts";
+export { loadAccounts, persistOnboardedAccount, loginAccount, findOAuthAccount, persistOAuthCredential } from "./accounts.ts";
+export type { LoadAccountsOptions, LoadedAccounts, PersistOnboardedAccountOptions, LoginOptions } from "./accounts.ts";
 export { runChat } from "./chat.ts";
 export type { RunChatOptions, RunChatResult } from "./chat.ts";
 export {

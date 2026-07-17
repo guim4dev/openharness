@@ -5,9 +5,11 @@ import {
   CredentialManager,
   EncryptedFileSecretStore,
   apiKeyAuthProvider,
+  oauthPkceAuthProvider,
 } from "@openharness/credentials";
 import type {
   Account,
+  AuthorizeResult,
   Profile,
   RotationPolicy,
   SecretStore,
@@ -49,6 +51,26 @@ const ENV_PROVIDERS: { envVar: string; provider: string; baseUrl?: string }[] = 
   { envVar: "OPENCODE_GO_API_KEY", provider: "opencode-go", baseUrl: "https://opencode.ai/zen/go/v1" },
 ];
 
+/** Non-secret OAuth endpoints/clientId an oauth account is configured with. */
+interface FileOAuthConfig {
+  authorizeEndpoint: string;
+  tokenEndpoint: string;
+  clientId: string;
+  scope?: string;
+  baseUrl?: string;
+}
+/**
+ * The NON-SECRET parts of an oauth StoredCredential that `openharness login`
+ * writes back into accounts.json so `loadAccounts` reconstructs a usable
+ * credential next run. Tokens NEVER live here — only refs into the secret store
+ * and the (non-secret) expiry metadata.
+ */
+interface FileOAuthCredential {
+  secretRef: string;
+  refreshRef?: string;
+  expiresAt?: number;
+  baseUrl?: string;
+}
 interface FileAccount {
   id: string;
   provider: string;
@@ -57,6 +79,10 @@ interface FileAccount {
   apiKey?: string;
   apiKeyEnv?: string;
   baseUrl?: string;
+  /** Present => this is an oauth account; its `authProviderId` defaults to `oauth:<id>`. */
+  oauth?: FileOAuthConfig;
+  /** Written by `openharness login`; absent until the first successful login. */
+  oauthCredential?: FileOAuthCredential;
 }
 interface FileProfile {
   policy?: RotationPolicy;
@@ -169,6 +195,48 @@ export async function loadAccounts(opts: LoadAccountsOptions = {}): Promise<Load
     for (const [name, profile] of Object.entries(file.profiles)) {
       ensureProfile(name, profile.policy);
       for (const acct of profile.accounts ?? []) {
+        // OAuth account: register a dedicated PKCE provider instance (endpoints
+        // differ per account, so each gets its own `authProviderId`) and build an
+        // oauth-kind credential. Tokens live in the secret store under the
+        // provider's refs, written by a prior `openharness login`; when absent the
+        // account still resolves but is unusable until a login runs — the same
+        // posture as the keyless api-key onboarding path below.
+        if (acct.oauth) {
+          if (seenIds.has(acct.id)) continue; // first definition wins
+          seenIds.add(acct.id);
+          const authProviderId = acct.authProviderId ?? `oauth:${acct.id}`;
+          if (!registry.get(authProviderId)) {
+            registry.register(
+              oauthPkceAuthProvider(secretStore, {
+                id: authProviderId,
+                authorizeEndpoint: acct.oauth.authorizeEndpoint,
+                tokenEndpoint: acct.oauth.tokenEndpoint,
+                clientId: acct.oauth.clientId,
+                ...(acct.oauth.scope ? { scope: acct.oauth.scope } : {}),
+                ...(acct.oauth.baseUrl ? { baseUrl: acct.oauth.baseUrl } : {}),
+              }),
+            );
+          }
+          const credential: StoredCredential = {
+            kind: "oauth",
+            secretRef: acct.oauthCredential?.secretRef ?? `${authProviderId}:${acct.id}`,
+          };
+          if (acct.oauthCredential?.refreshRef) credential.refreshRef = acct.oauthCredential.refreshRef;
+          if (acct.oauthCredential?.expiresAt !== undefined)
+            credential.expiresAt = acct.oauthCredential.expiresAt;
+          const oauthBaseUrl = acct.oauthCredential?.baseUrl ?? acct.oauth.baseUrl;
+          if (oauthBaseUrl) credential.baseUrl = oauthBaseUrl;
+          accounts.push({
+            id: acct.id,
+            provider: acct.provider,
+            authProviderId,
+            label: acct.label ?? `${acct.provider} (${acct.id})`,
+            credential,
+            health: { state: "ok" },
+          });
+          ensureProfile(name).accountIds.push(acct.id);
+          continue;
+        }
         const key = acct.apiKey ?? (acct.apiKeyEnv ? env[acct.apiKeyEnv] : undefined);
         if (key && key.trim() !== "") {
           await addAccount({
@@ -249,4 +317,104 @@ export async function persistOnboardedAccount(opts: PersistOnboardedAccountOptio
   if (idx >= 0) profile.accounts[idx] = entry;
   else profile.accounts.push(entry);
   await writeFile(path, `${JSON.stringify(file, null, 2)}\n`, "utf8");
+}
+
+/**
+ * Locate the oauth account `accountId` in `<dir>/accounts.json` and return its
+ * effective `authProviderId` (the provider instance `loadAccounts` registers
+ * for it) + vendor. Returns undefined when the id is absent or is not an oauth
+ * account (so `openharness login` can print a precise error).
+ */
+export async function findOAuthAccount(
+  accountId: string,
+  opts: { dir?: string } = {},
+): Promise<{ authProviderId: string; provider: string; label?: string } | undefined> {
+  const dir = opts.dir ?? configDir();
+  const file = await readAccountsFile(join(dir, "accounts.json"));
+  if (!file?.profiles) return undefined;
+  for (const profile of Object.values(file.profiles)) {
+    for (const acct of profile.accounts ?? []) {
+      if (acct.id === accountId && acct.oauth) {
+        return {
+          authProviderId: acct.authProviderId ?? `oauth:${acct.id}`,
+          provider: acct.provider,
+          ...(acct.label ? { label: acct.label } : {}),
+        };
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Persist the NON-SECRET refs/expiry of a freshly-logged-in oauth credential
+ * back into the account's `oauthCredential` in `<dir>/accounts.json`, so
+ * `loadAccounts` reconstructs a usable credential next run. Tokens themselves
+ * NEVER touch this file — only the copied fields (refs/expiry/baseUrl) are
+ * written, and they stay in the encrypted secret store under `secretRef` /
+ * `refreshRef`. Throws when the account is not an oauth entry in the file.
+ */
+export async function persistOAuthCredential(opts: {
+  dir?: string;
+  accountId: string;
+  credential: StoredCredential;
+}): Promise<void> {
+  const dir = opts.dir ?? configDir();
+  const path = join(dir, "accounts.json");
+  const file = await readAccountsFile(path);
+  let target: FileAccount | undefined;
+  if (file?.profiles) {
+    for (const profile of Object.values(file.profiles)) {
+      for (const acct of profile.accounts ?? []) {
+        if (acct.id === opts.accountId && acct.oauth) target = acct;
+      }
+    }
+  }
+  if (!target) throw new Error(`No oauth account '${opts.accountId}' in ${path}`);
+  const cred: FileOAuthCredential = { secretRef: opts.credential.secretRef };
+  if (opts.credential.refreshRef) cred.refreshRef = opts.credential.refreshRef;
+  if (opts.credential.expiresAt !== undefined) cred.expiresAt = opts.credential.expiresAt;
+  if (opts.credential.baseUrl) cred.baseUrl = opts.credential.baseUrl;
+  target.oauthCredential = cred;
+  await writeFile(path, `${JSON.stringify(file, null, 2)}\n`, "utf8");
+}
+
+export interface LoginOptions {
+  /** Config root holding `accounts.json` + the encrypted store. Default: `configDir()`. */
+  dir?: string;
+  /**
+   * Called once the authorization URL is ready, BEFORE awaiting the loopback
+   * redirect — the CLI prints the URL here; a test triggers the simulated
+   * browser GET. May be async; it is awaited before the redirect wait begins.
+   */
+  onAuthorize?: (auth: AuthorizeResult) => void | Promise<void>;
+}
+
+/**
+ * Drive the loopback OAuth (PKCE) login for an oauth account defined in
+ * `accounts.json`: resolve its provider from a freshly loaded registry (bound to
+ * the on-disk encrypted store), run `authorize()` -> `callback({ accountId })`
+ * (the loopback captures the redirect), and persist the resulting NON-SECRET
+ * refs/expiry so `loadAccounts` picks it up next run. The returned credential
+ * carries refs only — never a token. Tokens are written to the encrypted store
+ * by the provider's `callback`, and are never returned or logged here.
+ */
+export async function loginAccount(accountId: string, opts: LoginOptions = {}): Promise<StoredCredential> {
+  const dir = opts.dir ?? configDir();
+  const target = await findOAuthAccount(accountId, { dir });
+  if (!target) {
+    throw new Error(
+      `No oauth account '${accountId}' in accounts.json — add its oauth endpoints/clientId first.`,
+    );
+  }
+  const { registry } = await loadAccounts({ dir });
+  const provider = registry.get(target.authProviderId);
+  if (!provider) {
+    throw new Error(`No auth provider '${target.authProviderId}' registered for account '${accountId}'.`);
+  }
+  const auth = await provider.authorize();
+  await opts.onAuthorize?.(auth);
+  const credential = await provider.callback({ accountId });
+  await persistOAuthCredential({ dir, accountId, credential });
+  return credential;
 }

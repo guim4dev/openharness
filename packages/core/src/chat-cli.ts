@@ -21,6 +21,7 @@ import { createOpenHarnessServer } from "@openharness/server";
 import { refreshPinnedDefinition } from "./update.ts";
 import { runChat } from "./chat.ts";
 import { runDoctor } from "./doctor.ts";
+import { loginAccount } from "./accounts.ts";
 
 /** Value that follows a `--flag` token in argv, or undefined. */
 function flag(args: string[], name: string): string | undefined {
@@ -33,6 +34,8 @@ const USAGE = `openharness — build and run a company's own governed AI harness
 Usage:
   openharness <harness-dir> "<message>"       one live turn (bring your own key)
   openharness chat <harness-dir> "<message>"  same, explicit form
+  openharness login <accountId>               run the loopback OAuth (PKCE) login for an
+                                              accounts.json oauth account and save it
   openharness init <dir> [--name N] [--display D] [--provider P] [--model M]
                                               scaffold a starter definition
   openharness materialize <spec.json> <out-dir>
@@ -185,6 +188,29 @@ async function main(): Promise<void> {
     chmodSync(keyPath, 0o600);
     writeFileSync(pubPath, publicKey);
     process.stdout.write(`wrote ${keyPath} (private, 0600) and ${pubPath} (public)\n`);
+    process.exit(0);
+  }
+
+  // `openharness login <accountId>` — run the loopback OAuth (PKCE) flow for an
+  // oauth account defined in accounts.json, then persist the resulting NON-SECRET
+  // refs/expiry so the next run resolves it. Tokens are written to the encrypted
+  // store by the provider and are NEVER printed here.
+  if (args[0] === "login") {
+    const accountId = args[1];
+    if (!accountId || accountId.startsWith("--")) {
+      process.stderr.write("usage: openharness login <accountId>\n");
+      process.exit(2);
+    }
+    await loginAccount(accountId, {
+      onAuthorize: (auth) => {
+        process.stdout.write(
+          `Open this URL in your browser to sign in:\n\n  ${auth.url}\n\n${auth.instructions}\n\nWaiting for the browser redirect…\n`,
+        );
+      },
+    });
+    process.stdout.write(
+      `\nLogged in '${accountId}'. Credential saved (tokens stored encrypted; never printed).\n`,
+    );
     process.exit(0);
   }
 
