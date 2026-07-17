@@ -134,6 +134,27 @@ test("resolvePinnedBundle prefers a newer verified update and IGNORES a rollback
   expect(() => resolvePinnedBundle({ bakedBundlePath: baked, updatesDir, pubkeyPem: KEYS.publicKey, floorPath })).toThrow();
 });
 
+test("resolve FAILS CLOSED when the baked bundle is PRESENT but does not verify (must not collapse the floor to boot an older update)", () => {
+  const dir = tmp();
+  const updatesDir = join(dir, "updates");
+  const floorPath = join(dir, "floor.txt");
+  const baked = join(dir, "baked.ohbundle");
+  mkdirSync(updatesDir, { recursive: true });
+  // Shipped at 2.0.0, then TAMPERED on disk so it no longer verifies under the org key.
+  writeBundle(signAtVersion(dir, "2.0.0"), baked);
+  const buf = readFileSync(baked);
+  buf[buf.length >> 1] ^= 1;
+  writeFileSync(baked, buf);
+  // Attacker drops an org-signed OLDER bundle in updates; no floor file.
+  writeBundle(signAtVersion(dir, "1.5.0"), join(updatesDir, "example-1.5.0.ohbundle"));
+
+  // A tampered baked bundle must be a hard integrity failure — NOT a silent drop
+  // of the anti-rollback anchor to 0.0.0 that would boot the older 1.5.0.
+  expect(() =>
+    resolvePinnedBundle({ bakedBundlePath: baked, updatesDir, pubkeyPem: KEYS.publicKey, floorPath }),
+  ).toThrow(/baked|verif|integrity/i);
+});
+
 test("e2e: refresh pulls a newer bundle over the REAL loopback server and pins it", async () => {
   const dir = tmp();
   const bundlesDir = join(dir, "server-bundles");

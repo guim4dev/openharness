@@ -148,13 +148,21 @@ export interface ResolveOptions {
  */
 export function resolvePinnedBundle(opts: ResolveOptions): { path: string; version: string } {
   // The baked bundle's own version is the trustworthy lower bound. Verify it
-  // WITHOUT a floor to read its version; if even the baked bundle doesn't verify
-  // under the org key, fall back to the persisted floor alone.
+  // WITHOUT a floor to read its version. If the baked bundle is PRESENT but does
+  // not verify under the org key, that is a hard integrity failure — refuse to
+  // boot. Silently dropping the anchor here (to the attacker-writable floor file
+  // or 0.0.0) would let a tampered/unreadable baked bundle COLLAPSE the
+  // anti-rollback floor, so an older org-signed bundle in the updates dir would
+  // boot. Only a genuinely ABSENT baked bundle falls back to the persisted floor.
   let bakedVersion: string | undefined;
-  try {
-    bakedVersion = verifyBundle(readBundleFile(opts.bakedBundlePath), opts.pubkeyPem, {}).manifest.version;
-  } catch {
-    bakedVersion = undefined;
+  if (existsSync(opts.bakedBundlePath)) {
+    try {
+      bakedVersion = verifyBundle(readBundleFile(opts.bakedBundlePath), opts.pubkeyPem, {}).manifest.version;
+    } catch {
+      throw new BundleVerificationError(
+        `baked bundle is present but does not verify under the org key — refusing to boot (a tampered baked bundle must not collapse the anti-rollback floor): ${opts.bakedBundlePath}`,
+      );
+    }
   }
   const persisted = readFloor(opts.floorPath, bakedVersion ?? "0.0.0");
   const floor = bakedVersion ? maxVersion(persisted, bakedVersion) : persisted;
