@@ -65,8 +65,14 @@ everyone else. Before we lean on that claim we should exercise it.
   leaving the machine); `set_credential` → `ready` enables chat with no restart.
   Fail-closed on a blank key. The key **survives a restart** — the secret stays
   in the encrypted store and a keyless `accounts.json` reference is persisted,
-  resolved by `loadAccounts` next launch. (Provider OAuth subscriptions remain a
-  follow-up.)
+  resolved by `loadAccounts` next launch.
+- **✓ Shipped** — the consumer **OAuth-account** path (the api-key path is
+  unchanged): an `accounts.json` entry with an `oauth` block makes `loadAccounts`
+  register the loopback **PKCE** auth provider for that account, and
+  `openharness login <accountId>` runs the flow — tokens land in the encrypted
+  store, only non-secret refs/endpoints persist to `accounts.json`. Wiring a
+  specific provider's OAuth endpoints/client-id is the per-deployment step that
+  remains.
 
 ## v2 — the remote MCP gateway (the moat)
 
