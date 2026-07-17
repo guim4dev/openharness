@@ -21,7 +21,10 @@ export interface GovernedCallRecord {
  * args) and, when the tool actually ran, a `tool_result` entry (hash of the
  * REDACTED result). Raw args/results are never written — only canonical hashes.
  * The chain is server-side, so a patched local binary cannot skip it; the
- * harness's local chain is cross-checked against this one (divergence = tamper).
+ * harness's local chain is cross-checked against this one via
+ * `reconcileAuditLogs` / `openharness audit reconcile` (divergence = tamper: a
+ * governed call the gateway recorded but the local chain lacks means the local
+ * audit was skipped).
  */
 export async function auditGovernedCall(sink: AuditSink, rec: GovernedCallRecord): Promise<void> {
   const server = rec.tool.startsWith("mcp__") ? rec.tool.split("__")[1] : undefined;

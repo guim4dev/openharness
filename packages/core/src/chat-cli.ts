@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 import { chmodSync, readFileSync, writeFileSync } from "node:fs";
-import { auditExportToNdjson, createAuditShipper, exportAuditLog, httpAuditPush, verifyAuditLog } from "@openharness/audit";
+import {
+  auditExportToNdjson,
+  createAuditShipper,
+  exportAuditLog,
+  httpAuditPush,
+  reconcileAuditLogs,
+  verifyAuditLog,
+} from "@openharness/audit";
 import { buildHarnessApp } from "@openharness/build";
 import {
   BundleVerificationError,
@@ -45,6 +52,8 @@ Usage:
                                               compliance export (NDJSON + integrity manifest)
   openharness audit push <file> --server <url> [--source id] [--state path] [--token t]
                                               ship the local log to the authoritative server anchor
+  openharness audit reconcile <local> <gateway>
+                                              cross-check the local vs authoritative chain (divergence = tamper)
   openharness update --server <url> --pubkey <pub> --updates <dir> --floor <file> [--name N] [--current V] [--token t]
                                               pull + verify a newer signed definition (anti-rollback floor)
 
@@ -136,7 +145,29 @@ async function main(): Promise<void> {
       process.stderr.write(`audit push failed (retryable): ${r.retryable}\n`);
       process.exit(1);
     }
-    process.stderr.write("usage: openharness audit verify <file> | export <file> [...] | push <file> --server <url> [--source id] [--state path] [--token t]\n");
+    if (sub === "reconcile") {
+      const localPath = args[2];
+      const gatewayPath = args[3];
+      if (!localPath || !gatewayPath) {
+        process.stderr.write("usage: openharness audit reconcile <local.jsonl> <gateway.jsonl>\n");
+        process.exit(2);
+      }
+      const r = reconcileAuditLogs(localPath, gatewayPath);
+      if (r.ok) {
+        process.stdout.write(`audit chains reconcile: ${r.matched} governed call(s) match, no divergence\n`);
+        process.exit(0);
+      }
+      process.stderr.write(
+        `audit DIVERGENCE (tamper evidence): ${r.onlyInGateway.length} governed call(s) missing locally, ` +
+          `${r.onlyInLocal.length} local call(s) absent from the authoritative chain\n`,
+      );
+      for (const c of r.onlyInGateway) process.stderr.write(`  only in gateway: ${c.tool} (${c.argsHash.slice(0, 12)}…)\n`);
+      for (const c of r.onlyInLocal) process.stderr.write(`  only in local:   ${c.tool} (${c.argsHash.slice(0, 12)}…)\n`);
+      process.exit(1);
+    }
+    process.stderr.write(
+      "usage: openharness audit verify <file> | export <file> [...] | push <file> --server <url> [...] | reconcile <local> <gateway>\n",
+    );
     process.exit(2);
   }
 

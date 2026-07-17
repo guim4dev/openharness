@@ -256,3 +256,6 @@ export type { AuditExport, AuditExportManifest, ExportFilter, ExportAuditLogOpti
 
 export { createAuditShipper, httpAuditPush } from "./shipper.ts";
 export type { AuditShipper, AuditShipperOptions, AuditPush, AuditPushResult, ShipResult } from "./shipper.ts";
+
+export { reconcileAuditLogs } from "./reconcile.ts";
+export type { ReconcileResult } from "./reconcile.ts";
