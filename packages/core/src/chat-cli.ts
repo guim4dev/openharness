@@ -156,6 +156,13 @@ async function main(): Promise<void> {
         process.exit(2);
       }
       const r = reconcileAuditLogs(localPath, gatewayPath);
+      if (r.problems.length > 0) {
+        // Untrusted input (unverifiable chain / unparseable / malformed) — fail
+        // closed. This is NOT a clean "no divergence": we could not trust the files.
+        process.stderr.write(`audit reconcile FAILED — input could not be trusted:\n`);
+        for (const p of r.problems) process.stderr.write(`  ${p}\n`);
+        process.exit(1);
+      }
       if (r.ok) {
         process.stdout.write(`audit chains reconcile: ${r.matched} governed call(s) match, no divergence\n`);
         process.exit(0);

@@ -132,16 +132,23 @@ npm run chat -- audit push "$OH/session.jsonl" --server http://127.0.0.1:8899 --
 #  -> shipped 0 record(s) ... (ackedSeq=2)
 ```
 
-**Cross-check local against the anchor.** `audit reconcile` compares your local
-chain to the gateway's ingested copy (`ingested-<source>.jsonl`) and reports any
-divergence as tamper evidence:
+**Cross-check two chains.** `audit reconcile` compares the governed calls in a
+local chain against a gateway chain and reports any divergence. It **verifies
+both chains first and fails closed** on a corrupt/truncated/unverifiable file
+(it never reports "no divergence" on input it couldn't parse). Here we point it
+at the copy the server ingested — a well-formed round-trip, so it agrees:
 
 ```bash
 npm run chat -- audit reconcile "$OH/session.jsonl" "$OH/srv-audit/ingested-sess-demo.jsonl"
 #  -> audit chains reconcile: 3 governed call(s) match, no divergence
-#  (on divergence → "audit DIVERGENCE (tamper evidence): ..." with per-call
-#   "only in gateway / only in local" lines, exit 1)
+#  (divergence → "audit DIVERGENCE (tamper evidence): ..." with per-call lines, exit 1;
+#   a corrupt/unverifiable file → "audit reconcile FAILED — input could not be trusted", exit 1)
 ```
+
+Reconcile is a **cross-check, not the anchor**: it's a multiset compare scoped to
+the gateway's governed tools, so it does not catch a reordering or a forged call
+of a tool the gateway never recorded. The authoritative tamper signal remains the
+**server** refusing a forked/forged push (above).
 
 Now forge the local log and ship it to a **fresh** source — the server refuses:
 
