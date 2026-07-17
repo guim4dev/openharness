@@ -241,11 +241,17 @@ gateway on the next call:
 "broker": { "kind": "pool", "upstreams": { "github": ["github-a", "github-b"] } }
 ```
 
-> The IdP token-exchange above uses a **static-key** verifier (one configured
-> Ed25519 public key); a JWKS-fetching verifier, the KMS credential broker, and
-> the out-of-process connector sandbox are built as provider-agnostic seams with
-> offline references (see [`ROADMAP.md`](ROADMAP.md)) and wired programmatically —
-> config selectors for the KMS broker + sandbox are the remaining polish.
+**Out-of-process connector sandbox (config).** Add `"sandbox": { "kind":
+"child-process" }` and each connector's `call()` runs in a warm per-(principal,
+connector) worker process (own memory + crash domain). The default worker runs
+under `node --experimental-strip-types`; a bundled deploy sets
+`"sandbox": { "kind": "child-process", "execArgv": [] }`.
+
+> The IdP token-exchange uses a **static-key** verifier (one configured Ed25519
+> public key); a JWKS-fetching verifier and the KMS credential broker are built
+> as provider-agnostic seams with offline references (see [`ROADMAP.md`](ROADMAP.md))
+> and wired programmatically — a real KMS is injected via the deployment's own
+> broker, so there's no dev-only KMS config selector.
 
 ## 6. Build a branded desktop app
 

@@ -4,23 +4,29 @@ import { SecretStoreKms, type KmsStore } from "./broker.ts";
 import { PooledKmsStore } from "./broker-pool.ts";
 import { createApprovalQueue } from "./approval.ts";
 import { createConnectorSessions } from "./sessions.ts";
-import { createSandboxedConnectorSessions, type ConnectorDescriptor, type SandboxHost } from "./connector-sandbox.ts";
+import {
+  ChildProcessSandboxHost,
+  createSandboxedConnectorSessions,
+  type ConnectorDescriptor,
+  type SandboxHost,
+} from "./connector-sandbox.ts";
 import { createStaticKeyIdpVerifier } from "./idp-static.ts";
-import { createGithubReadConnector } from "./connectors/github-read.ts";
-import { createNotifyConnector } from "./connectors/notify.ts";
+import { factories as builtinFactories } from "./connectors/registry.ts";
 import type { Connector } from "./connectors/index.ts";
 import { startGatewayHttp, type GatewayHttpServer } from "./http.ts";
 import type { ResolvedGatewayServerConfig } from "./config.ts";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 /**
- * Connector implementations a config may instantiate by `type`. Kept small and
- * explicit — a signed config must never be able to spin up an arbitrary
- * connector; only vetted, first-party ones are registered here.
+ * Connector implementations a config may instantiate by `type` — the vetted
+ * first-party registry, shared with the out-of-process worker via
+ * `connectors/registry.ts` (one source of truth).
  */
-const CONNECTOR_FACTORIES: Record<string, () => Connector> = {
-  "github-read": () => createGithubReadConnector(),
-  notify: () => createNotifyConnector(),
-};
+const CONNECTOR_FACTORIES: Record<string, () => Connector> = builtinFactories;
+/** Absolute path to the built-in connector registry module (worker default). */
+const BUILTIN_REGISTRY = fileURLToPath(new URL("./connectors/registry.ts", import.meta.url));
+/** Absolute path to the connector worker entry. */
+const CONNECTOR_WORKER = fileURLToPath(new URL("./connector-worker.ts", import.meta.url));
 
 export interface StartGatewayFromConfigOptions {
   /**
@@ -72,16 +78,23 @@ export async function startGatewayFromConfig(
   config: ResolvedGatewayServerConfig,
   opts: StartGatewayFromConfigOptions,
 ): Promise<GatewayHttpServer> {
+  // The in-process connector factories power the NON-sandbox path. In sandbox
+  // mode the connectors are instantiated inside the worker from the sandbox
+  // registry module, and their types are validated there — so this in-process
+  // validation would wrongly reject a sandbox-only type, and is skipped.
+  const sandboxActive = !!opts.sandbox || config.sandbox?.kind === "child-process";
   const registry: Record<string, () => Connector> = { ...CONNECTOR_FACTORIES, ...(opts.connectorFactories ?? {}) };
   const factories: Record<string, () => Connector> = {};
-  for (const c of config.connectors) {
-    const factory = registry[c.type];
-    if (!factory) {
-      throw new Error(
-        `gateway config: connector '${c.id}' has unknown type '${c.type}' (known: ${Object.keys(registry).join(", ")})`,
-      );
+  if (!sandboxActive) {
+    for (const c of config.connectors) {
+      const factory = registry[c.type];
+      if (!factory) {
+        throw new Error(
+          `gateway config: connector '${c.id}' has unknown type '${c.type}' (known: ${Object.keys(registry).join(", ")})`,
+        );
+      }
+      factories[c.id] = factory;
     }
-    factories[c.id] = factory;
   }
 
   // IdP token exchange (deploy hardening §3): when the config declares it, mount
@@ -112,6 +125,31 @@ export async function startGatewayFromConfig(
         })
       : undefined;
 
+  // Connector sandbox (deploy hardening §5). An explicit `opts.sandbox` wins;
+  // else the config selects the child-process sandbox: the worker imports the
+  // registry module (built-in first-party by default) for its factories, and we
+  // import the SAME module here to snapshot each connector's static descriptor
+  // (tools/allowHosts) — the only part the pipeline reads in-process.
+  let configuredSandbox: { host: SandboxHost; descriptors: Record<string, ConnectorDescriptor> } | undefined;
+  if (config.sandbox?.kind === "child-process") {
+    const registryModule = config.sandbox.registryModule ?? BUILTIN_REGISTRY;
+    const reg = (await import(pathToFileURL(registryModule).href)) as { factories?: Record<string, () => Connector> };
+    const descriptors: Record<string, ConnectorDescriptor> = {};
+    for (const c of config.connectors) {
+      const make = reg.factories?.[c.type];
+      if (!make) throw new Error(`gateway config: sandbox registry has no connector type '${c.type}'`);
+      const inst = make();
+      descriptors[c.id] = { id: inst.id, tools: inst.tools, allowHosts: inst.allowHosts };
+    }
+    const host = new ChildProcessSandboxHost({
+      workerModule: CONNECTOR_WORKER,
+      registryModule,
+      execArgv: config.sandbox.execArgv ?? ["--experimental-strip-types", "--no-warnings"],
+    });
+    configuredSandbox = { host, descriptors };
+  }
+  const sandbox = opts.sandbox ?? configuredSandbox;
+
   return startGatewayHttp({
     catalog: config.catalog,
     gatewayPublicKeyPem: config.gatewayPublicKeyPem,
@@ -127,9 +165,7 @@ export async function startGatewayFromConfig(
       policy: config.policy,
       policyVersion: config.policyVersion,
       broker: opts.broker ?? configuredBroker ?? new SecretStoreKms(opts.secretStore),
-      sessions: opts.sandbox
-        ? createSandboxedConnectorSessions(opts.sandbox)
-        : createConnectorSessions(factories),
+      sessions: sandbox ? createSandboxedConnectorSessions(sandbox) : createConnectorSessions(factories),
       audit: createFileAuditLog(config.auditPath),
       approval: createApprovalQueue(config.approval ?? { timeoutMs: 30_000 }),
     },

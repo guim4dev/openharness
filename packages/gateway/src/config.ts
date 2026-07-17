@@ -69,6 +69,20 @@ export const gatewayServerConfigSchema = z.object({
       upstreams: z.record(z.array(z.string().min(1)).min(1)),
     })
     .optional(),
+  /**
+   * Out-of-process connector sandbox (deploy hardening §5). When present, each
+   * connector's `call()` runs in a warm per-(principal, connector) worker
+   * process. `registryModule` (a path, default the built-in first-party
+   * registry) is the module the worker imports for its `factories`; `execArgv`
+   * are the Node flags for the fork (default strips TS so a `.ts` worker runs).
+   */
+  sandbox: z
+    .object({
+      kind: z.literal("child-process"),
+      registryModule: z.string().min(1).optional(),
+      execArgv: z.array(z.string()).optional(),
+    })
+    .optional(),
   catalog: z.array(toolSpecSchema).min(1),
   connectors: z.array(connectorSchema).min(1),
 });
@@ -97,6 +111,8 @@ export interface ResolvedGatewayServerConfig {
   };
   /** Credential broker selection (pass-through; no file refs to resolve). */
   broker?: GatewayServerConfig["broker"];
+  /** Sandbox selection; `registryModule` resolved to an absolute path. */
+  sandbox?: { kind: "child-process"; registryModule?: string; execArgv?: string[] };
   catalog: GatewayServerConfig["catalog"];
   connectors: GatewayServerConfig["connectors"];
 }
@@ -141,6 +157,15 @@ export function loadGatewayServerConfig(configPath: string): ResolvedGatewayServ
     ...(cfg.approval ? { approval: cfg.approval } : {}),
     ...(tokenExchange ? { tokenExchange } : {}),
     ...(cfg.broker ? { broker: cfg.broker } : {}),
+    ...(cfg.sandbox
+      ? {
+          sandbox: {
+            kind: cfg.sandbox.kind,
+            ...(cfg.sandbox.registryModule ? { registryModule: resolve(baseDir, cfg.sandbox.registryModule) } : {}),
+            ...(cfg.sandbox.execArgv ? { execArgv: cfg.sandbox.execArgv } : {}),
+          },
+        }
+      : {}),
     catalog: cfg.catalog,
     connectors: cfg.connectors,
   };

@@ -6,6 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { InMemorySecretStore } from "@openharness/credentials";
 import { generateKeyPairSync, sign } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { generateAuthKeypair, mintGatewayToken, type GatewayClaims } from "./auth.ts";
 import { createDpopFetch } from "./dpop-http.ts";
 import { loadGatewayServerConfig } from "./config.ts";
@@ -131,6 +132,45 @@ test("the config's policy is authoritative — a denied tool is blocked end to e
   try {
     const res = await mcp.callTool({ name: "github__list_issues", arguments: { owner: "a", repo: "b" } });
     expect(res.isError).toBe(true);
+  } finally {
+    await mcp.close();
+  }
+});
+
+test("a config with a child-process SANDBOX runs a governed call in a real worker process", async () => {
+  dir = mkdtempSync(join(tmpdir(), "oh-gw-sbx-"));
+  const gw = generateAuthKeypair();
+  writeFileSync(join(dir, "gw.pub"), gw.publicKey);
+  writeFileSync(join(dir, "gw.key"), gw.privateKey);
+  writeFileSync(join(dir, "policy.json"), JSON.stringify({ default: "allow", rules: [] }));
+  // Point the sandbox at the no-network echo fixture registry so the test is hermetic.
+  const registryModule = fileURLToPath(new URL("./__fixtures__/sandbox-connectors.ts", import.meta.url));
+  writeFileSync(
+    join(dir, "gateway.json"),
+    JSON.stringify({
+      host: "127.0.0.1",
+      keys: { publicKey: "gw.pub", privateKey: "gw.key" },
+      policy: "policy.json",
+      policyVersion: "1.0.0",
+      auditPath: "audit.log",
+      sandbox: { kind: "child-process", registryModule, execArgv: ["--experimental-strip-types", "--no-warnings"] },
+      catalog: [{ name: "echo__run", connectorId: "echo", upstreamId: "echo" }],
+      connectors: [{ id: "echo", type: "echo" }],
+    }),
+  );
+  const resolved = loadGatewayServerConfig(join(dir, "gateway.json"));
+  const store = new InMemorySecretStore();
+  await store.set("upstream:echo", "sekret");
+  running = await startGatewayFromConfig(resolved, { secretStore: store });
+
+  const mcp = await connect(running.url, gw.privateKey, gw.publicKey);
+  try {
+    const res = await mcp.callTool({ name: "echo__run", arguments: { a: 1 } });
+    expect(res.isError).toBeFalsy();
+    const echoed = JSON.parse((res.content as { text: string }[])[0].text) as { toolName: string; secret: string; pid: number };
+    expect(echoed.toolName).toBe("echo__run");
+    expect(echoed.secret).toBe("sekret"); // the credential was marshaled into the worker
+    expect(echoed.pid).not.toBe(process.pid); // genuinely a separate OS process
   } finally {
     await mcp.close();
   }
