@@ -126,7 +126,11 @@ constrained by them rather than discovering them later:
 - **Governed credential pooling** — but only where it's *not* a consumer
   subscription (D11 stands: personal ChatGPT/Codex/OpenCode-Go seats are never
   pooled across users). Org service credentials rotate behind the gateway under
-  least-privilege, scoped per upstream.
+  least-privilege, scoped per upstream. ✓ Built: `PooledKmsStore` +
+  `CredentialPool` draw each upstream's credential from an ordered pool with
+  per-credential health; the pipeline reports each call's outcome so a
+  rate-limited/auth-failed credential rotates behind the gateway (fail-closed
+  when all are unhealthy).
 - **A compliance/export API** so the authoritative audit stream feeds existing
   SIEM / retention systems — the integration regulated buyers actually ask for.
   ✓ Built: `exportAuditLog` / `openharness audit export` emit filtered records
@@ -159,8 +163,11 @@ questions a human must answer first) is in
   `attestations` check fails a pinned runner target whose provenance doesn't
   verify (and, under `--strict-supply-chain`, one shipping none). Production
   resolves the trust-root key via Sigstore (Fulcio/Rekor) — key discovery is the
-  seam, the crypto is identical. Remaining: policy-layer defaults over `mcp__*`
-  egress.
+  seam, the crypto is identical. ✓ **MCP egress secure-by-default too:** the
+  `init` starter policy governs every mcp tool (deny destructive → ask the rest),
+  and `doctor` probes each declared server for a rule that governs its arbitrary
+  tools — a narrow rule no longer counts — failing `--strict-supply-chain` on
+  ungoverned egress.
 
 ## v3 — reach
 
@@ -175,7 +182,9 @@ questions a human must answer first) is in
   is `openharness materialize <spec> <dir>`. The write+doctor+sanitize core, the
   reducer, and the panel are unit-tested; the WS/Tauri round-trip is
   typecheck-verified (not yet exercised in a running app). It now reopens a saved definition to edit (round-trip-safe — the gateway pin
-  survives) and saves it again. Remaining polish: richer skill authoring.
+  survives) and saves it again. ✓ **Richer skill authoring landed:**
+  `materialize` writes inline `SKILL.md` (containment-checked) and the builder
+  edits a skill's body, round-tripping it byte-for-byte on save→reopen.
 - **Managed cloud** — a hosted gateway + bundle host + audit sink for orgs that
   don't want to run infra, with the self-hosted path always a first-class equal.
 
