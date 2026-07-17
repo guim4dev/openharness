@@ -86,15 +86,26 @@ party, and the employee's machine never sees the secret.
 > gateway is unreachable. Proven over real loopback HTTP end to end, and
 > **runnable** — `openharness-gateway serve <config.json>` boots the pipeline from
 > a zod-validated config against a machine-local encrypted secret store.
-> **Remaining:** deploy hardening — a real IdP/token-exchange flow, a KMS-backed
-> broker, a containerized connector sandbox — now **designed**
-> ([`specs/2026-07-16-gateway-deploy-hardening-design.md`](specs/2026-07-16-gateway-deploy-hardening-design.md)):
-> each grounded in a mature standard (OAuth 2.1 token exchange / RFC 8693, cloud
-> KMS, out-of-process workers), swapping a dev implementation behind an interface
-> that already exists — awaiting the human calls in that spec's §7 (which IdP,
-> which KMS, latency budget) before implementation. The connector/broker layer is
-> behind swappable interfaces so [OpenConnector](vision.md#13) can slot in as the
-> backend once it matures.
+> **✓ Deploy hardening — the three dev-grade seams are now built** as
+> provider-agnostic interfaces + reference impls + tests
+> ([`specs/2026-07-16-gateway-deploy-hardening-design.md`](specs/2026-07-16-gateway-deploy-hardening-design.md)),
+> each grounded in a mature standard: **(1) IdP token exchange** (OAuth 2.1 /
+> RFC 8693) — a `POST /token` endpoint swaps an org IdP subject token for the
+> short-lived DPoP-bound gateway token, making `sub`/`groups` IdP-asserted;
+> `IdpVerifier` is the swappable seam. **(2) KMS credential broker** —
+> `KmsBrokerStore` over a `SecretsManager` (holds the KMS-wrapped blob) + a
+> `KmsClient` (the one audited decrypt), so the gateway keeps no long-lived
+> plaintext; shipped with an offline `LocalKms` reference (real AES-256-GCM,
+> context-bound). **(3) Out-of-process connector sandbox** — a warm
+> per-(principal, connector) worker PROCESS (`ChildProcessSandboxHost`) with its
+> own memory + crash domain, egress tap inside the worker, crash containment +
+> respawn; `SandboxHost` lets a container/microVM swap behind it. Each swaps a
+> dev implementation behind an interface that already existed; the governed
+> pipeline is unchanged. **Remaining is a deployment's own choice** — wiring the
+> specific IdP JWKS, the specific KMS/secrets-manager (instance role / workload
+> identity), and the worker runtime/latency budget (the human calls in that
+> spec's §7). The connector/broker layer is behind swappable interfaces so
+> [OpenConnector](vision.md#13) can slot in as the backend once it matures.
 
 This is also where the ecosystem's sharpest edges live, so the design is
 constrained by them rather than discovering them later:
@@ -136,8 +147,15 @@ questions a human must answer first) is in
   policy layer first-class over `mcp__*` egress. ✓ Started: `doctor` flags any
   MCP server fetched unpinned on launch across npm/PyPI/container runners
   (containers pinned only by an `@sha256:` digest), and `--strict-supply-chain`
-  turns that into a build-failing gate. Remaining: server attestation, and
-  policy-layer defaults over `mcp__*` egress.
+  turns that into a build-failing gate. ✓ **Artifact attestation built** —
+  `verifyProvenance` does real DSSE + in-toto/SLSA verification (signature
+  against a trust root, subject-digest match, allowed-builder check — the exact
+  format npm provenance / cosign / SLSA emit), and `doctor`'s opt-in
+  `attestations` check fails a pinned runner target whose provenance doesn't
+  verify (and, under `--strict-supply-chain`, one shipping none). Production
+  resolves the trust-root key via Sigstore (Fulcio/Rekor) — key discovery is the
+  seam, the crypto is identical. Remaining: policy-layer defaults over `mcp__*`
+  egress.
 
 ## v3 — reach
 

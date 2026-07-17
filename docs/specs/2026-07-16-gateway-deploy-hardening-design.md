@@ -1,12 +1,17 @@
 # v2 gateway — deploy hardening (design proposal)
 
-**Status:** DRAFT proposal for review. Not approved for implementation. Written
-autonomously (Fable-authored) as decision-support: it grounds each remaining
-deploy-hardening piece in a MATURE standard, lays out the options with
-trade-offs, gives a recommendation, and lists the calls a human must make (§7)
-before an implementation plan. Nothing here needs building until those are
-answered — most also need real infra (an IdP, a KMS, a container host) the build
-environment does not have.
+**Status:** IMPLEMENTED (seams). All three hardening seams below — token
+exchange (§3), KMS broker (§4), connector sandbox (§5) — plus artifact
+attestation are now built as **provider-agnostic interfaces + offline reference
+implementations + tests**, behind the interfaces this design identified. What
+this design flagged as needing real infra + a human decision (§7) is exactly
+what remains: a deployment wires the specific IdP JWKS, the specific
+KMS/secrets-manager (instance role / workload identity), the worker
+runtime/latency budget, and the Sigstore trust-root for attestation. The code
+does not pick those for you — it makes each a one-interface swap.
+
+Originally written autonomously (Fable-authored) as decision-support; kept as
+the rationale for the shape that was built.
 
 **Relationship to the roadmap:** this is the "Remaining: deploy hardening" line
 under the v2 milestone in [`../ROADMAP.md`](../ROADMAP.md), and the "Deferred"

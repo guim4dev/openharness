@@ -101,10 +101,18 @@ without DPoP is refused at the edge, a denied tool never reaches the upstream.
 It is **runnable**: `openharness-gateway serve <config.json>` boots the whole
 pipeline from a zod-validated config (keys, policy, pinned catalog, connectors)
 against a machine-local encrypted secret store.
-**Deferred:** gateway deploy hardening (real IdP/token-exchange flow, KMS-backed
-broker, containerized connector sandbox); final `tauri build` + fresh-account
-validation (manual); OS code-signing; a builder UI; cloud. (OpenConnector §13 may
-back the connector layer once mature.)
+The **gateway deploy hardening** seams are now built too, each provider-agnostic
+(interface + offline reference + tests): IdP **token exchange** (OAuth 2.1 /
+RFC 8693 `POST /token` → DPoP-bound token, `IdpVerifier` seam); a **KMS
+credential broker** (`KmsBrokerStore` over a secrets-manager + KMS-decrypt seam,
+`LocalKms` reference, no long-lived plaintext); an **out-of-process connector
+sandbox** (warm per-principal worker process, own memory + crash domain,
+`SandboxHost` seam); and **artifact attestation** (`verifyProvenance` — real
+DSSE + in-toto/SLSA, wired into `doctor`). What remains is a deployment's own
+wiring (which IdP/KMS/runtime) plus the Sigstore key-discovery for attestation.
+**Deferred:** final `tauri build` + fresh-account validation (manual); OS
+code-signing; a builder UI; cloud. (OpenConnector §13 may back the connector
+layer once mature.)
 
 ---
 
