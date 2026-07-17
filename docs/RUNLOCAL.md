@@ -146,6 +146,8 @@ encrypted store beside the config — never in the config file.
 ```bash
 export OH=/tmp/oh-local && mkdir -p "$OH/gw"
 npm run chat -- keygen --out "$OH/gw/gw"          # the gateway's signing keypair
+# The IdP's Ed25519 keypair (for token exchange, below). Any Ed25519 PEM works:
+node -e 'const{generateKeyPairSync}=require("crypto"),fs=require("fs");const k=generateKeyPairSync("ed25519",{publicKeyEncoding:{type:"spki",format:"pem"},privateKeyEncoding:{type:"pkcs8",format:"pem"}});fs.writeFileSync(process.argv[1],k.publicKey);fs.writeFileSync(process.argv[2],k.privateKey)' "$OH/gw/idp.pub" "$OH/gw/idp.key"
 
 cat > "$OH/gw/config.json" <<'JSON'
 {
@@ -154,6 +156,7 @@ cat > "$OH/gw/config.json" <<'JSON'
   "policy": { "default": "allow", "rules": [{ "match": "github__*", "action": "allow" }] },
   "policyVersion": "1.0.0",
   "auditPath": "gateway-audit.jsonl",
+  "tokenExchange": { "idpPublicKey": "idp.pub", "issuer": "https://idp.local", "audience": "openharness-gateway" },
   "catalog": [
     { "name": "github__list_issues", "connectorId": "github",
       "inputSchema": { "type": "object", "properties": { "owner": {"type":"string"}, "repo": {"type":"string"} }, "required": ["owner","repo"] } }
@@ -177,17 +180,34 @@ refused before it touches the pipeline:
 curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8900/mcp    # -> 401
 ```
 
-A real client reaches the governed tools by declaring this gateway in its
-harness definition (`gateway: { url, pubkey, tools }`) — see the
-[`harnesses/acme-gateway`](../harnesses/acme-gateway) example — and minting a
-DPoP-bound token. The full request/response path (allow audited · no-DPoP
-refused · deny never reaches upstream) is exercised end to end in
-`packages/gateway/src/http.test.ts`.
+**Token exchange (deploy hardening §3).** Because the config declares
+`tokenExchange`, the gateway mints a DPoP-bound token from an org-IdP subject
+token. Mint an Ed25519 JWT with the IdP key and exchange it:
 
-> The IdP token-exchange, KMS credential broker, and out-of-process connector
-> sandbox are built as provider-agnostic seams with offline references (see
-> [`ROADMAP.md`](ROADMAP.md)); wiring them into `serve` via config is on the
-> roadmap.
+```bash
+export OH=/tmp/oh-local
+TOKEN=$(node -e 'const{sign}=require("crypto"),fs=require("fs");const b=o=>Buffer.from(JSON.stringify(o)).toString("base64url");const h=b({alg:"EdDSA",typ:"JWT"});const p=b({sub:"alice@acme.com",iss:"https://idp.local",aud:"openharness-gateway",exp:Math.floor(Date.now()/1000)+300,groups:["eng"]});process.stdout.write(h+"."+p+"."+sign(null,Buffer.from(h+"."+p),fs.readFileSync(process.argv[1],"utf8")).toString("base64url"))' "$OH/gw/idp.key")
+CLIENTPUB=$(node -e 'process.stdout.write(Buffer.from(require("crypto").generateKeyPairSync("ed25519",{publicKeyEncoding:{type:"spki",format:"pem"}}).publicKey).toString("base64url"))')
+
+curl -s -X POST http://127.0.0.1:8900/token -H "authorization: Bearer $TOKEN" -H "x-oh-dpop-key: $CLIENTPUB"
+#  -> {"access_token":"...","token_type":"DPoP","expires_in":300}
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8900/token -H "authorization: Bearer nope" -H "x-oh-dpop-key: $CLIENTPUB"
+#  -> 401  (a subject token that fails IdP validation gets NO gateway token)
+```
+
+A real client keeps the DPoP *private* key (this demo only sends the public one),
+uses the returned `access_token` to sign per-request proofs, and declares the
+gateway in its harness definition (`gateway: { url, pubkey, tools }`) — see the
+[`harnesses/acme-gateway`](../harnesses/acme-gateway) example. The full governed
+call path (allow audited · no-DPoP refused · deny never reaches upstream · IdP
+JWT → token → call) is exercised end to end in
+`packages/gateway/src/{http,serve}.test.ts`.
+
+> The IdP token-exchange above uses a **static-key** verifier (one configured
+> Ed25519 public key); a JWKS-fetching verifier, the KMS credential broker, and
+> the out-of-process connector sandbox are built as provider-agnostic seams with
+> offline references (see [`ROADMAP.md`](ROADMAP.md)) — wiring the latter two into
+> `serve` via config is next.
 
 ## 6. Build a branded desktop app
 

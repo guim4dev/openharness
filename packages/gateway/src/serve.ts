@@ -4,6 +4,7 @@ import { SecretStoreKms, type KmsStore } from "./broker.ts";
 import { createApprovalQueue } from "./approval.ts";
 import { createConnectorSessions } from "./sessions.ts";
 import { createSandboxedConnectorSessions, type ConnectorDescriptor, type SandboxHost } from "./connector-sandbox.ts";
+import { createStaticKeyIdpVerifier } from "./idp-static.ts";
 import { createGithubReadConnector } from "./connectors/github-read.ts";
 import { createNotifyConnector } from "./connectors/notify.ts";
 import type { Connector } from "./connectors/index.ts";
@@ -75,6 +76,19 @@ export async function startGatewayFromConfig(
     factories[c.id] = factory;
   }
 
+  // IdP token exchange (deploy hardening §3): when the config declares it, mount
+  // POST <tokenPath> with a static-key EdDSA-JWT verifier over the configured IdP
+  // public key. Requires the gateway private key (present in config) to mint.
+  const tx = config.tokenExchange;
+  const idp = tx
+    ? createStaticKeyIdpVerifier({
+        publicKeyPem: tx.idpPublicKeyPem,
+        issuer: tx.issuer,
+        audience: tx.audience,
+        ...(tx.groupsClaim ? { groupsClaim: tx.groupsClaim } : {}),
+      })
+    : undefined;
+
   return startGatewayHttp({
     catalog: config.catalog,
     gatewayPublicKeyPem: config.gatewayPublicKeyPem,
@@ -82,6 +96,9 @@ export async function startGatewayFromConfig(
     ...(config.host !== undefined ? { host: config.host } : {}),
     ...(config.port !== undefined ? { port: config.port } : {}),
     ...(config.path !== undefined ? { path: config.path } : {}),
+    ...(idp ? { idp } : {}),
+    ...(tx?.tokenPath ? { tokenPath: tx.tokenPath } : {}),
+    ...(tx?.ttlMs ? { tokenTtlMs: tx.ttlMs } : {}),
     pipeline: {
       policy: config.policy,
       policyVersion: config.policyVersion,

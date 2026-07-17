@@ -39,6 +39,23 @@ export const gatewayServerConfigSchema = z.object({
   /** Where the authoritative hash-chained audit log is written (required — a gateway must audit). */
   auditPath: z.string().min(1),
   approval: z.object({ timeoutMs: z.number().int().positive(), requireSecondPerson: z.boolean().optional() }).optional(),
+  /**
+   * IdP token exchange (deploy hardening §3). When present, `POST <tokenPath>`
+   * exchanges an EdDSA-JWT subject token from the org IdP (validated against
+   * `idpPublicKey` with iss/aud/exp) for a DPoP-bound gateway token. Omit for the
+   * dev path where tokens are minted out of band.
+   */
+  tokenExchange: z
+    .object({
+      /** PEM file path (relative to the config) of the IdP's Ed25519 public key. */
+      idpPublicKey: z.string().min(1),
+      issuer: z.string().min(1),
+      audience: z.string().min(1),
+      groupsClaim: z.string().min(1).optional(),
+      tokenPath: z.string().min(1).optional(),
+      ttlMs: z.number().int().positive().optional(),
+    })
+    .optional(),
   catalog: z.array(toolSpecSchema).min(1),
   connectors: z.array(connectorSchema).min(1),
 });
@@ -56,6 +73,15 @@ export interface ResolvedGatewayServerConfig {
   policyVersion: string;
   auditPath: string;
   approval?: { timeoutMs: number; requireSecondPerson?: boolean };
+  /** Resolved token-exchange config: the IdP public key read to PEM in memory. */
+  tokenExchange?: {
+    idpPublicKeyPem: string;
+    issuer: string;
+    audience: string;
+    groupsClaim?: string;
+    tokenPath?: string;
+    ttlMs?: number;
+  };
   catalog: GatewayServerConfig["catalog"];
   connectors: GatewayServerConfig["connectors"];
 }
@@ -77,6 +103,17 @@ export function loadGatewayServerConfig(configPath: string): ResolvedGatewayServ
   const policyRaw = typeof cfg.policy === "string" ? JSON.parse(readFileSync(resolve(baseDir, cfg.policy), "utf8")) : cfg.policy;
   const policy = parsePolicy(policyRaw);
 
+  const tokenExchange = cfg.tokenExchange
+    ? {
+        idpPublicKeyPem: readFileSync(resolve(baseDir, cfg.tokenExchange.idpPublicKey), "utf8"),
+        issuer: cfg.tokenExchange.issuer,
+        audience: cfg.tokenExchange.audience,
+        ...(cfg.tokenExchange.groupsClaim ? { groupsClaim: cfg.tokenExchange.groupsClaim } : {}),
+        ...(cfg.tokenExchange.tokenPath ? { tokenPath: cfg.tokenExchange.tokenPath } : {}),
+        ...(cfg.tokenExchange.ttlMs ? { ttlMs: cfg.tokenExchange.ttlMs } : {}),
+      }
+    : undefined;
+
   return {
     ...(cfg.host !== undefined ? { host: cfg.host } : {}),
     ...(cfg.port !== undefined ? { port: cfg.port } : {}),
@@ -87,6 +124,7 @@ export function loadGatewayServerConfig(configPath: string): ResolvedGatewayServ
     policyVersion: cfg.policyVersion,
     auditPath: resolve(baseDir, cfg.auditPath),
     ...(cfg.approval ? { approval: cfg.approval } : {}),
+    ...(tokenExchange ? { tokenExchange } : {}),
     catalog: cfg.catalog,
     connectors: cfg.connectors,
   };
