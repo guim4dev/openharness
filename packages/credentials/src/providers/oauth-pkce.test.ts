@@ -149,3 +149,55 @@ test("callback rejects a wrong or absent state and never exchanges the code", as
 
   expect(idp.hits()).toBe(0); // the token endpoint was never reached
 });
+
+// ── review fixes: loopback listener lifecycle (no leak / no hang / GET-only) ──
+
+const okIdp = () => startMockIdp(() => ({ status: 200, body: { access_token: "at", refresh_token: "rt", expires_in: 3600 } }));
+function portOf(url: string): number {
+  return Number(new URL(new URL(url).searchParams.get("redirect_uri")!).port);
+}
+async function completeFlow(provider: ReturnType<typeof oauthPkceAuthProvider>, authUrl: string, accountId: string) {
+  const state = new URL(authUrl).searchParams.get("state")!;
+  const uri = new URL(authUrl).searchParams.get("redirect_uri")!;
+  await fetch(`${uri}?code=c&state=${state}`); // browser GET redirect
+  await provider.callback({ accountId }); // resolves + closes the loopback server
+}
+
+test("a second authorize() closes the first loopback listener (no orphaned socket)", async () => {
+  idp = await okIdp();
+  const provider = oauthPkceAuthProvider(new InMemorySecretStore(), {
+    id: "x", authorizeEndpoint: "https://idp/a", tokenEndpoint: idp.tokenEndpoint, clientId: "c",
+  });
+  const auth1 = await provider.authorize();
+  const port1 = portOf(auth1.url!);
+  const auth2 = await provider.authorize(); // must tear down auth1's server
+
+  await expect(fetch(`http://127.0.0.1:${port1}/callback`)).rejects.toThrow(); // port1 refused
+  await completeFlow(provider, auth2.url!, "acct"); // clean up port2
+});
+
+test("the loopback flow times out instead of hanging forever (listener released)", async () => {
+  idp = await okIdp();
+  const provider = oauthPkceAuthProvider(new InMemorySecretStore(), {
+    id: "x", authorizeEndpoint: "https://idp/a", tokenEndpoint: idp.tokenEndpoint, clientId: "c",
+    callbackTimeoutMs: 40,
+  });
+  const auth = await provider.authorize();
+  const port = portOf(auth.url!);
+  // Browser flow: no code/state -> waits for a redirect that never comes -> times out.
+  await expect(provider.callback({ accountId: "acct" })).rejects.toThrow(/timed out/);
+  expect(idp.hits()).toBe(0); // never reached the token endpoint
+  await expect(fetch(`http://127.0.0.1:${port}/callback`)).rejects.toThrow(); // server closed on timeout
+});
+
+test("the loopback handler rejects a non-GET request (real redirect is always GET)", async () => {
+  idp = await okIdp();
+  const provider = oauthPkceAuthProvider(new InMemorySecretStore(), {
+    id: "x", authorizeEndpoint: "https://idp/a", tokenEndpoint: idp.tokenEndpoint, clientId: "c",
+  });
+  const auth = await provider.authorize();
+  const uri = new URL(auth.url!).searchParams.get("redirect_uri")!;
+  const r = await fetch(uri, { method: "POST" });
+  expect(r.status).toBe(405);
+  await completeFlow(provider, auth.url!, "acct"); // clean up
+});

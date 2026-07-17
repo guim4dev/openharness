@@ -27,6 +27,14 @@ export interface OAuthPkceConfig {
   baseUrl?: string;
   /** Clock seam for expiry math (tests inject a fixed clock). */
   now?: () => number;
+  /**
+   * How long the loopback listener waits for the browser redirect before giving
+   * up (rejecting + closing the server), so an abandoned login can't pin a
+   * listening socket forever. Default 5 min.
+   */
+  callbackTimeoutMs?: number;
+  /** Max token-endpoint response size (bytes). Default 1 MiB. Guards against a hostile endpoint. */
+  maxTokenResponseBytes?: number;
 }
 
 /** Fields the callback receives (the parsed redirect + which account it is for). */
@@ -49,6 +57,8 @@ interface PendingAuth {
   server: Server;
   /** Resolves with the redirect query once the loopback listener catches it. */
   waitForRedirect: Promise<{ code?: string; state?: string }>;
+  /** The timeout that rejects `waitForRedirect` + closes the server if the browser never returns. */
+  timer: ReturnType<typeof setTimeout>;
 }
 
 function base64url(buf: Buffer): string {
@@ -82,7 +92,18 @@ export function oauthPkceAuthProvider(store: SecretStore, config: OAuthPkceConfi
       body: body.toString(),
     });
     if (!res.ok) throw new Error(`OAuth token endpoint returned HTTP ${res.status}`);
-    const json = (await res.json()) as Partial<TokenResponse>;
+    // Guard against a hostile/compromised token endpoint streaming a huge body.
+    const maxBytes = config.maxTokenResponseBytes ?? 1024 * 1024;
+    const declared = Number(res.headers.get("content-length") ?? "0");
+    if (declared > maxBytes) throw new Error("OAuth token endpoint response too large");
+    const text = await res.text();
+    if (text.length > maxBytes) throw new Error("OAuth token endpoint response too large");
+    let json: Partial<TokenResponse>;
+    try {
+      json = JSON.parse(text) as Partial<TokenResponse>;
+    } catch {
+      throw new Error("OAuth token endpoint returned a non-JSON response");
+    }
     if (typeof json.access_token !== "string" || json.access_token === "") {
       throw new Error("OAuth token endpoint response missing access_token");
     }
@@ -101,16 +122,32 @@ export function oauthPkceAuthProvider(store: SecretStore, config: OAuthPkceConfi
     id,
 
     async authorize() {
+      // A re-issued or concurrent authorize() must not orphan the prior loopback
+      // listener (which had no way to be closed). Tear it down first.
+      if (pending) {
+        clearTimeout(pending.timer);
+        await closeServer(pending.server).catch(() => {});
+        pending = undefined;
+      }
+
       const verifier = base64url(randomBytes(32));
       const challenge = s256(verifier);
       const state = base64url(randomBytes(16));
 
       let resolveRedirect!: (r: { code?: string; state?: string }) => void;
-      const waitForRedirect = new Promise<{ code?: string; state?: string }>((resolve) => {
+      let rejectRedirect!: (e: Error) => void;
+      const waitForRedirect = new Promise<{ code?: string; state?: string }>((resolve, reject) => {
         resolveRedirect = resolve;
+        rejectRedirect = reject;
       });
 
       const server = createServer((req, res) => {
+        // The OAuth redirect is always a browser GET; reject anything else.
+        if ((req.method ?? "").toUpperCase() !== "GET") {
+          res.writeHead(405);
+          res.end();
+          return;
+        }
         const u = new URL(req.url ?? "/", "http://127.0.0.1");
         if (u.pathname !== redirectPath) {
           res.writeHead(404);
@@ -124,6 +161,13 @@ export function oauthPkceAuthProvider(store: SecretStore, config: OAuthPkceConfi
           state: u.searchParams.get("state") ?? undefined,
         });
       });
+
+      // Bound the wait so an abandoned browser step never pins the listener.
+      const timer = setTimeout(
+        () => rejectRedirect(new Error("OAuth login timed out waiting for the browser redirect")),
+        config.callbackTimeoutMs ?? 300_000,
+      );
+      if (typeof timer.unref === "function") timer.unref();
 
       const port = await new Promise<number>((resolve, reject) => {
         server.on("error", reject);
@@ -142,7 +186,7 @@ export function oauthPkceAuthProvider(store: SecretStore, config: OAuthPkceConfi
       authUrl.searchParams.set("state", state);
       if (config.scope) authUrl.searchParams.set("scope", config.scope);
 
-      pending = { verifier, state, redirectUri, server, waitForRedirect };
+      pending = { verifier, state, redirectUri, server, waitForRedirect, timer };
       return {
         method: "browser",
         url: authUrl.toString(),
@@ -197,6 +241,7 @@ export function oauthPkceAuthProvider(store: SecretStore, config: OAuthPkceConfi
           baseUrl: config.baseUrl,
         };
       } finally {
+        clearTimeout(p.timer);
         await closeServer(p.server);
         pending = undefined;
       }
