@@ -57,6 +57,16 @@ export interface GatewayHttpOptions {
    * operator credential.
    */
   adminToken?: string;
+  /**
+   * Per-approver bearer tokens (approver identity -> token). When set, the
+   * approval surface authenticates the approver by their token and uses that
+   * IDENTITY as the resolution's `by` — so `requireSecondPerson` becomes a real
+   * control (the approver can't be spoofed via the request body). `adminToken`
+   * still works as a single operator (identity "admin"). Approver names should
+   * match the requester principal shape (e.g. an email) so self-approval is
+   * detected. Tokens come from the deployment (env / secret store), not config.
+   */
+  approvers?: Record<string, string>;
   /** Approval admin path prefix (default "/admin"). */
   adminPath?: string;
   /** Where non-fatal errors (request failures, cleanup failures) are logged. Default: console.error. */
@@ -94,6 +104,25 @@ function bearerMatches(header: string | undefined, expected: string): boolean {
   const b = Buffer.from(expected);
   if (a.length !== b.length) return false;
   return timingSafeEqual(a, b);
+}
+
+/**
+ * Authenticate an approval-admin bearer to an approver IDENTITY (or undefined).
+ * A per-approver token resolves to that approver's name; the single `adminToken`
+ * resolves to "admin". Every candidate is checked with a constant-time compare.
+ */
+function authenticateApprover(
+  header: string | undefined,
+  adminToken: string | undefined,
+  approvers: Record<string, string> | undefined,
+): string | undefined {
+  if (adminToken && bearerMatches(header, adminToken)) return "admin";
+  if (approvers) {
+    for (const [name, token] of Object.entries(approvers)) {
+      if (bearerMatches(header, token)) return name;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -211,12 +240,16 @@ export async function startGatewayHttp(opts: GatewayHttpOptions): Promise<Gatewa
       return;
     }
 
-    // 0b. Approval admin surface (fail-closed server-side approval). Gated by the
-    //     out-of-band admin bearer (NOT DPoP). Only mounted when an admin token
-    //     is set. `GET <adminPath>/approvals` lists the server-rendered pending
-    //     items; `POST <adminPath>/approvals/<id>` resolves one.
-    if (opts.adminToken && url.startsWith(`${adminPath}/approvals`)) {
-      if (!bearerMatches(hdr(req.headers as Record<string, string | undefined>, "authorization"), opts.adminToken)) {
+    // 0b. Approval admin surface (fail-closed server-side approval). Gated by an
+    //     out-of-band bearer (NOT DPoP). The presented token authenticates an
+    //     APPROVER IDENTITY (a per-approver token, or the single `adminToken` as
+    //     "admin"); that identity — not a request-body field — is the `by` used
+    //     to resolve, so `requireSecondPerson` can't be spoofed. `GET
+    //     <adminPath>/approvals` lists pending items; `POST .../<id>` resolves one.
+    if ((opts.adminToken || opts.approvers) && url.startsWith(`${adminPath}/approvals`)) {
+      const bearer = hdr(req.headers as Record<string, string | undefined>, "authorization");
+      const approver = authenticateApprover(bearer, opts.adminToken, opts.approvers);
+      if (!approver) {
         sendJson(res, 401, { error: "unauthorized" });
         return;
       }
@@ -228,16 +261,17 @@ export async function startGatewayHttp(opts: GatewayHttpOptions): Promise<Gatewa
       }
       const idMatch = /^\/([^/?]+)$/.exec(rest);
       if (method === "POST" && idMatch) {
-        const body = (await readJsonBody(req)) as { approved?: unknown; by?: unknown } | undefined;
+        const body = (await readJsonBody(req)) as { approved?: unknown } | undefined;
         if (!body || typeof body.approved !== "boolean") {
-          sendJson(res, 400, { error: "body must be { approved: boolean, by?: string }" });
+          sendJson(res, 400, { error: "body must be { approved: boolean }" });
           return;
         }
         if (!opts.pipeline.approval) {
           sendJson(res, 404, { error: "no approval queue configured" });
           return;
         }
-        opts.pipeline.approval.resolve(idMatch[1], body.approved, typeof body.by === "string" ? body.by : undefined);
+        // `by` is the AUTHENTICATED approver — never taken from the body.
+        opts.pipeline.approval.resolve(idMatch[1], body.approved, approver);
         sendJson(res, 200, { ok: true });
         return;
       }

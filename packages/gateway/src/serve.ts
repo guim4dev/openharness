@@ -59,6 +59,13 @@ export interface StartGatewayFromConfigOptions {
    */
   adminToken?: string;
   /**
+   * Per-approver bearer tokens (approver identity -> token) for the approval
+   * surface — makes `requireSecondPerson` a real control (the `by` is the
+   * authenticated approver, not a body field). From the deployment's env/secret
+   * store, never the config file. Composes with `adminToken` (identity "admin").
+   */
+  approvers?: Record<string, string>;
+  /**
    * Extra/override connector factories by `type`, merged OVER the built-in
    * registry. Lets a deployment register a private connector, and lets a test
    * inject a stubbed one so no real upstream is reached. A `type` present here
@@ -161,6 +168,7 @@ export async function startGatewayFromConfig(
     ...(tx?.tokenPath ? { tokenPath: tx.tokenPath } : {}),
     ...(tx?.ttlMs ? { tokenTtlMs: tx.ttlMs } : {}),
     ...(opts.adminToken ? { adminToken: opts.adminToken } : {}),
+    ...(opts.approvers ? { approvers: opts.approvers } : {}),
     pipeline: {
       policy: config.policy,
       policyVersion: config.policyVersion,

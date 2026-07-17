@@ -34,7 +34,11 @@ afterEach(async () => {
   running = undefined;
 });
 
-async function boot(policyRaw: unknown = { default: "allow", rules: [] }, extra: Record<string, unknown> = {}) {
+async function boot(
+  policyRaw: unknown = { default: "allow", rules: [] },
+  extra: Record<string, unknown> = {},
+  approvalOpts: { timeoutMs?: number; requireSecondPerson?: boolean } = {},
+) {
   const gateway = generateAuthKeypair();
   const store = new InMemorySecretStore();
   await store.set("upstream:github", "ghp_orgtoken");
@@ -50,7 +54,7 @@ async function boot(policyRaw: unknown = { default: "allow", rules: [] }, extra:
       broker: new SecretStoreKms(store),
       sessions: createConnectorSessions({ github: () => createGithubReadConnector(stubGithub()) }),
       audit,
-      approval: createApprovalQueue({ timeoutMs: 2_000 }),
+      approval: createApprovalQueue({ timeoutMs: 2_000, ...approvalOpts }),
     },
     ...extra,
   });
@@ -145,6 +149,61 @@ test("e2e over real HTTP: admin DENY of an `ask` blocks the call; no admin token
     });
     const res = await callP;
     expect(res.isError).toBe(true);
+  } finally {
+    await mcp.close();
+  }
+});
+
+test("e2e over real HTTP: per-approver tokens make requireSecondPerson a real control (self ignored, second person approves)", async () => {
+  // The requester principal is alice@acme.com (CLAIMS.sub). Give both alice and
+  // boss an approver token; under requireSecondPerson, alice can't approve her
+  // own call, boss can — and the identity comes from the TOKEN, not the body.
+  const approvers = { "alice@acme.com": "alice-tok", "boss@acme.com": "boss-tok" };
+  const { gateway, url, audit } = await boot(
+    { default: "allow", rules: [{ match: "github__*", action: "ask" }] },
+    { approvers },
+    { requireSecondPerson: true },
+  );
+  const adminBase = url.replace("/mcp", "/admin/approvals");
+  const asBoss = { authorization: "Bearer boss-tok" };
+  const mcp = await connectClient(url, gateway.privateKey, gateway.publicKey);
+  try {
+    const callP = mcp.callTool({ name: "github__list_issues", arguments: { owner: "acme", repo: "app" } });
+
+    let pending: { id: string }[] = [];
+    for (let i = 0; i < 40 && pending.length === 0; i++) {
+      const r = await fetch(adminBase, { headers: asBoss });
+      pending = ((await r.json()) as { pending: typeof pending }).pending;
+      if (pending.length === 0) await sleep(50);
+    }
+    expect(pending.length).toBe(1);
+    const id = pending[0].id;
+
+    // A wrong token is refused.
+    expect((await fetch(adminBase, { headers: { authorization: "Bearer nope" } })).status).toBe(401);
+
+    // Self-approval: alice's token authenticates as alice === requester → the
+    // queue ignores it under requireSecondPerson. The body cannot spoof another
+    // identity (there is no `by` field). The call stays pending.
+    await fetch(`${adminBase}/${id}`, {
+      method: "POST",
+      headers: { authorization: "Bearer alice-tok", "content-type": "application/json" },
+      body: JSON.stringify({ approved: true, by: "boss@acme.com" }), // spoof attempt — ignored
+    });
+    const afterSelf = ((await (await fetch(adminBase, { headers: asBoss })).json()) as { pending: { id: string }[] }).pending;
+    expect(afterSelf.length).toBe(1); // still pending — self-approval did not settle it
+
+    // A genuine second person (boss) approves → the suspended call runs.
+    const pr = await fetch(`${adminBase}/${id}`, {
+      method: "POST",
+      headers: { authorization: "Bearer boss-tok", "content-type": "application/json" },
+      body: JSON.stringify({ approved: true }),
+    });
+    expect(pr.status).toBe(200);
+    const res = await callP;
+    expect(res.isError).toBeFalsy();
+    const call = audit.find((e) => e.type === "tool_call") as { decision?: string } | undefined;
+    expect(call?.decision).toBe("ask-approved");
   } finally {
     await mcp.close();
   }

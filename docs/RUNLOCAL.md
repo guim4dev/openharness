@@ -224,6 +224,12 @@ curl -s -X POST http://127.0.0.1:8900/admin/approvals/<id> -H 'authorization: Be
 #  -> {"ok":true}   (the suspended call proceeds; a wrong/absent admin token → 401/404)
 ```
 
+For real dual-control (`requireSecondPerson`), wire **per-approver** tokens
+instead of the single admin token — the deployment passes an
+`approvers` map (identity → token) to `startGatewayFromConfig`. The approver is
+then authenticated by their token and that identity is the `by`, so an approver
+can't approve their own request and the identity can't be spoofed via the body.
+
 A real client keeps the DPoP *private* key (this demo only sends the public one),
 uses the returned `access_token` to sign per-request proofs, and declares the
 gateway in its harness definition (`gateway: { url, pubkey, tools }`) — see the
