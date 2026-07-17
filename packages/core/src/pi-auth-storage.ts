@@ -27,8 +27,14 @@ export function createOpenHarnessAuthStorage(opts: {
   manager: CredentialManager;
   registry: AuthProviderRegistry;
   profile: string;
+  /** Clock seam for oauth expiry math. Default Date.now. (Injected in tests.) */
+  now?: () => number;
+  /** Refresh an oauth token this many ms before it expires. Default 60s. */
+  refreshSkewMs?: number;
 }): OpenHarnessAuthStorage {
   const authStorage = AuthStorage.inMemory();
+  const now = opts.now ?? (() => Date.now());
+  const skewMs = opts.refreshSkewMs ?? 60_000;
   return {
     authStorage,
     async syncActiveProvider(providerId: string): Promise<Account | undefined> {
@@ -41,7 +47,30 @@ export function createOpenHarnessAuthStorage(opts: {
       }
       const provider = opts.registry.get(account.authProviderId);
       if (!provider) throw new Error(`Unknown auth provider '${account.authProviderId}'.`);
-      const req = await provider.applyToRequest(account.credential, { headers: {} });
+
+      // Expiry-aware refresh — oauth only, so the api-key path is byte-for-byte
+      // unchanged. Refresh when the token is missing an expiry, expiring within
+      // the skew, or already past, and the provider can refresh.
+      let cred = account.credential;
+      if (
+        cred.kind === "oauth" &&
+        provider.refresh &&
+        (cred.expiresAt === undefined || cred.expiresAt - now() <= skewMs)
+      ) {
+        try {
+          cred = await provider.refresh(cred);
+          account.credential = cred; // persist refreshed metadata (tokens stay in the store)
+        } catch (err) {
+          // Refresh failed: mark the account invalid so rotation picks another
+          // account next sync, clear any stale override, and surface the failure
+          // — never fall through to a stale token.
+          opts.manager.reportResult(account.id, { ok: false, kind: "auth" });
+          authStorage.removeRuntimeApiKey(providerId);
+          throw new Error(`OAuth token refresh failed for account '${account.id}'.`, { cause: err });
+        }
+      }
+
+      const req = await provider.applyToRequest(cred, { headers: {} });
       if (req.apiKey) authStorage.setRuntimeApiKey(providerId, req.apiKey);
       else authStorage.removeRuntimeApiKey(providerId);
       return account;
