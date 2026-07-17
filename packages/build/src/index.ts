@@ -8,6 +8,19 @@ import { bundleDefinition, writeBundle } from "@openharness/bundle";
 import { loadHarnessDefinition } from "@openharness/definition";
 import type { HarnessManifest } from "@openharness/definition";
 
+export {
+  verifyProvenance,
+  signProvenance,
+  sha256Hex,
+} from "./attestation.ts";
+export type {
+  DsseEnvelope,
+  InTotoStatement,
+  TrustRoot,
+  ArtifactRef,
+  ProvenanceVerdict,
+} from "./attestation.ts";
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** packages/build/src -> repo root (three levels up). */
 const DEFAULT_REPO_ROOT = resolve(HERE, "..", "..", "..");

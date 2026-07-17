@@ -312,3 +312,77 @@ test("a parameterized allow rule suppresses the mandatory-mcp-all-denied false p
   const report = await runDoctor(dir);
   expect(codes(report.problems)).not.toContain("mandatory-mcp-all-denied");
 });
+
+// ── artifact provenance (attestation) ──────────────────────────────────────
+import { generateKeyPairSync } from "node:crypto";
+import { sha256Hex, signProvenance } from "@openharness/build";
+
+const PROV_TARGET = "@modelcontextprotocol/server-filesystem@2025.9.0";
+const PROV_BUILDER = "https://github.com/mcp/servers/.github/workflows/release.yml@refs/tags/v2025.9.0";
+const provServer = { transport: "stdio" as const, command: "npx", args: ["-y", PROV_TARGET, "/docs"] };
+
+function provKeypair(): { publicKey: string; privateKey: string } {
+  return generateKeyPairSync("ed25519", {
+    publicKeyEncoding: { type: "spki", format: "pem" },
+    privateKeyEncoding: { type: "pkcs8", format: "pem" },
+  });
+}
+
+function provBundle(privateKeyPem: string, builderId = PROV_BUILDER) {
+  const bytes = Buffer.from(`artifact ${PROV_TARGET}`);
+  const sha256 = sha256Hex(bytes);
+  const envelope = signProvenance(
+    {
+      _type: "https://in-toto.io/Statement/v1",
+      subject: [{ name: PROV_TARGET, digest: { sha256 } }],
+      predicateType: "https://slsa.dev/provenance/v1",
+      predicate: { runDetails: { builder: { id: builderId } } },
+    },
+    privateKeyPem,
+  );
+  return { sha256, envelope };
+}
+
+test("a valid provenance for the pinned MCP target passes attestation", async () => {
+  const { publicKey, privateKey } = provKeypair();
+  const dir = writeDef(baseManifest({ mcp: { servers: { fs: provServer } } }));
+  const report = await runDoctor(dir, {
+    attestations: {
+      trustRoot: { keys: [publicKey], allowedBuilders: [PROV_BUILDER] },
+      bundles: { [PROV_TARGET]: provBundle(privateKey) },
+    },
+  });
+  expect(codes(report.problems)).not.toContain("artifact-provenance-failed");
+  expect(codes(report.problems)).not.toContain("artifact-provenance-missing");
+});
+
+test("a provenance from an unlisted builder is an attestation error", async () => {
+  const { publicKey, privateKey } = provKeypair();
+  const dir = writeDef(baseManifest({ mcp: { servers: { fs: provServer } } }));
+  const report = await runDoctor(dir, {
+    attestations: {
+      trustRoot: { keys: [publicKey], allowedBuilders: [PROV_BUILDER] },
+      bundles: { [PROV_TARGET]: provBundle(privateKey, "https://evil/builder") },
+    },
+  });
+  expect(report.ok).toBe(false);
+  expect(codes(report.problems)).toContain("artifact-provenance-failed");
+});
+
+test("strict supply chain with NO provenance for a pinned target is an error", async () => {
+  const { publicKey } = provKeypair();
+  const dir = writeDef(baseManifest({ mcp: { servers: { fs: provServer } } }));
+  const report = await runDoctor(dir, {
+    strictSupplyChain: true,
+    attestations: { trustRoot: { keys: [publicKey], allowedBuilders: [PROV_BUILDER] }, bundles: {} },
+  });
+  expect(report.ok).toBe(false);
+  expect(codes(report.problems)).toContain("artifact-provenance-missing");
+});
+
+test("without an attestations option, no provenance check runs (opt-in)", async () => {
+  const dir = writeDef(baseManifest({ mcp: { servers: { fs: provServer } } }));
+  const report = await runDoctor(dir, { strictSupplyChain: true });
+  expect(codes(report.problems)).not.toContain("artifact-provenance-failed");
+  expect(codes(report.problems)).not.toContain("artifact-provenance-missing");
+});

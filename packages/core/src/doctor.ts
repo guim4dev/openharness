@@ -2,6 +2,7 @@ import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { HarnessDefinitionError, loadHarnessDefinition } from "@openharness/definition";
 import { checkModel, decideTool, globMatch } from "@openharness/policy";
+import { verifyProvenance, type DsseEnvelope, type TrustRoot } from "@openharness/build";
 
 /**
  * `openharness doctor` — preflight a HarnessDefinition without building it.
@@ -132,6 +133,21 @@ export interface RunDoctorOptions {
    * conscious org opts in for a CI gate.
    */
   strictSupplyChain?: boolean;
+  /**
+   * Artifact provenance to verify (deploy hardening — attestation). When set,
+   * doctor verifies each declared MCP runner target's signed SLSA/in-toto
+   * provenance against the trust root: a supplied bundle must verify (bad
+   * signature / digest mismatch / untrusted builder → error), and under
+   * `strictSupplyChain` a pinned runner target WITHOUT a verified bundle is an
+   * error too (a CI gate: "every fetched artifact ships verified provenance").
+   * Production resolves the trust root's key via Sigstore (Fulcio/Rekor); the
+   * verification is offline and identical.
+   */
+  attestations?: {
+    trustRoot: TrustRoot;
+    /** Provenance keyed by the runner target (e.g. `pkg@ver`); sha256 = the artifact's actual digest. */
+    bundles: Record<string, { sha256: string; envelope: DsseEnvelope }>;
+  };
 }
 
 export async function runDoctor(defDir: string, opts: RunDoctorOptions = {}): Promise<DoctorReport> {
@@ -200,6 +216,36 @@ export async function runDoctor(defDir: string, opts: RunDoctorOptions = {}): Pr
         code: "mcp-server-unpinned",
         message: `mcp server '${server}' runs '${run.target}' via ${run.runner} with no pinned ${run.runner === "docker" || run.runner === "podman" ? "digest" : "version"} — pin it ('${run.hint}') so a malicious or breaking upstream update can't auto-ship`,
       });
+  }
+
+  // 3c. Artifact provenance (attestation). For each MCP server run through a
+  //     launch-time fetcher, verify the target artifact's signed SLSA/in-toto
+  //     provenance against the trust root. Only runs when `attestations` is
+  //     supplied; a supplied-but-invalid bundle always fails, and under strict a
+  //     pinned target lacking a verified bundle fails too.
+  if (opts.attestations) {
+    const { trustRoot, bundles } = opts.attestations;
+    for (const [server, spec] of Object.entries(manifest.mcp?.servers ?? {})) {
+      if (spec.transport !== "stdio" || !spec.command) continue;
+      const run = runnerPinStatus(spec.command, spec.args ?? []);
+      if (!run) continue; // a locally-installed binary fetches nothing to attest
+      const bundle = bundles[run.target];
+      if (bundle) {
+        const v = verifyProvenance({ name: run.target, sha256: bundle.sha256 }, bundle.envelope, trustRoot);
+        if (!v.verified)
+          problems.push({
+            level: "error",
+            code: "artifact-provenance-failed",
+            message: `mcp server '${server}' target '${run.target}' has provenance that does not verify: ${v.reason}`,
+          });
+      } else if (opts.strictSupplyChain && run.pinned) {
+        problems.push({
+          level: "error",
+          code: "artifact-provenance-missing",
+          message: `mcp server '${server}' target '${run.target}' ships no verified provenance (strict supply chain requires signed SLSA/in-toto attestation)`,
+        });
+      }
+    }
   }
 
   if (policy) {
