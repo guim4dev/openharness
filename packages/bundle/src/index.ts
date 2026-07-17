@@ -111,7 +111,7 @@ function parseVersion(v: string): number[] {
 }
 
 /** true when semver `a` is strictly older than `b` (major.minor.patch, pre-release ignored). */
-function isOlder(a: string, b: string): boolean {
+export function isOlder(a: string, b: string): boolean {
   const pa = parseVersion(a);
   const pb = parseVersion(b);
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {

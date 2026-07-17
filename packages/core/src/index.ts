@@ -8,6 +8,8 @@ export type { LiveSession, LiveSessionEvent, CreateLiveSessionOptions } from "./
 export { loadGatewayTools } from "./gateway-bridge.ts";
 export type { GatewayAuth, LoadGatewayToolsOptions, LoadGatewayToolsResult } from "./gateway-bridge.ts";
 export { runDoctor } from "./doctor.ts";
+export { refreshPinnedDefinition, resolvePinnedBundle, readFloor } from "./update.ts";
+export type { RefreshOptions, RefreshResult, ResolveOptions } from "./update.ts";
 export type { DoctorReport, DoctorProblem, DoctorLevel, RunDoctorOptions } from "./doctor.ts";
 export { buildPolicyExtension } from "./policy-extension.ts";
 export type { PolicyExtensionOptions } from "./policy-extension.ts";

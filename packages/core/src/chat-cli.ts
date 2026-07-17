@@ -11,6 +11,7 @@ import {
 } from "@openharness/bundle";
 import { MaterializeError, ScaffoldError, scaffoldHarness, writeHarnessDefinition } from "@openharness/definition";
 import { createOpenHarnessServer } from "@openharness/server";
+import { refreshPinnedDefinition } from "./update.ts";
 import { runChat } from "./chat.ts";
 import { runDoctor } from "./doctor.ts";
 
@@ -44,6 +45,8 @@ Usage:
                                               compliance export (NDJSON + integrity manifest)
   openharness audit push <file> --server <url> [--source id] [--state path] [--token t]
                                               ship the local log to the authoritative server anchor
+  openharness update --server <url> --pubkey <pub> --updates <dir> --floor <file> [--name N] [--current V] [--token t]
+                                              pull + verify a newer signed definition (anti-rollback floor)
 
 Docs: https://github.com/guim4dev/openharness`;
 
@@ -151,6 +154,40 @@ async function main(): Promise<void> {
     chmodSync(keyPath, 0o600);
     writeFileSync(pubPath, publicKey);
     process.stdout.write(`wrote ${keyPath} (private, 0600) and ${pubPath} (public)\n`);
+    process.exit(0);
+  }
+
+  // `openharness update ...` — pull a newer signed definition from the server,
+  // verify it under the org pubkey with the persisted anti-rollback floor, and
+  // write it to the updates dir (advancing the floor). A tampered/rolled-back
+  // bundle is refused (exit 1); an up-to-date server is a clean no-op (exit 0).
+  if (args[0] === "update") {
+    const server = flag(args, "--server");
+    const pubkeyPath = flag(args, "--pubkey");
+    const updatesDir = flag(args, "--updates");
+    const floorPath = flag(args, "--floor");
+    if (!server || !pubkeyPath || !updatesDir || !floorPath) {
+      process.stderr.write(
+        "usage: openharness update --server <url> --pubkey <pub> --updates <dir> --floor <file> [--name N] [--current V] [--token t]\n",
+      );
+      process.exit(2);
+    }
+    const r = await refreshPinnedDefinition({
+      serverUrl: server,
+      pubkeyPem: readFileSync(pubkeyPath, "utf8"),
+      updatesDir,
+      floorPath,
+      ...(flag(args, "--name") ? { name: flag(args, "--name") } : {}),
+      ...(flag(args, "--current") ? { currentVersion: flag(args, "--current") } : {}),
+      ...(flag(args, "--token") ? { token: flag(args, "--token") } : {}),
+    });
+    if (r.rejected) {
+      process.stderr.write(`update REJECTED (tamper/rollback): ${r.reason}\n`);
+      process.exit(1);
+    }
+    process.stdout.write(
+      r.updated ? `updated to ${r.version} (written to ${updatesDir}, floor advanced)\n` : `already up to date at ${r.version}\n`,
+    );
     process.exit(0);
   }
 

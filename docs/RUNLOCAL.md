@@ -83,6 +83,21 @@ npm run chat -- bundle verify "$OH/assistant.ohbundle.bad" --pubkey "$OH/org.pub
 bundle (anti-rollback). The full branded-app version of this story is in
 [`DEMO.md`](DEMO.md).
 
+**Pull a newer definition (update channel).** `openharness update` fetches the
+hosted bundle from a server, verifies it under the org pubkey with a persisted
+monotonic **floor** as the minimum version, and writes an accepted newer bundle
+to an updates dir (advancing the floor). A tampered or rolled-back bundle is
+refused; the floor means an attacker who later drops an older org-signed bundle
+into the updates dir cannot roll the app back.
+
+```bash
+# (host a v0.2.0 bundle via `openharness serve --bundles <dir>`; see §4 for serve)
+npm run chat -- update --server http://127.0.0.1:8899 --pubkey "$OH/org.pub" \
+    --updates "$OH/updates" --floor "$OH/floor.txt" --name assistant --current 0.1.0
+#  -> updated to 0.2.0 (written to .../updates, floor advanced)
+#  re-run → "already up to date at 0.2.0"; a rolled-back/tampered bundle → "update REJECTED", exit 1
+```
+
 ## 4. The audit anchor — tamper-evidence that survives a forged local log
 
 OpenHarness records external-call events to a hash-chained log. That local chain
