@@ -157,6 +157,22 @@ export async function startGatewayFromConfig(
   }
   const sandbox = opts.sandbox ?? configuredSandbox;
 
+  // `requireSecondPerson` is only a real control if a distinct approver identity
+  // can act. The single shared `adminToken` resolves to identity "admin", which
+  // always differs from an IdP `sub` — so it would pass the second-person check
+  // while letting ONE operator approve their own request. Fail closed at boot
+  // rather than provide false dual control: require at least one non-empty
+  // per-approver token when requireSecondPerson is set.
+  if (config.approval?.requireSecondPerson) {
+    const hasApprover = Object.values(opts.approvers ?? {}).some(
+      (t) => typeof t === "string" && t.trim() !== "",
+    );
+    if (!hasApprover)
+      throw new Error(
+        "approval.requireSecondPerson is set but no per-approver tokens are configured — the shared admin token cannot be a distinct second person (one operator could self-approve). Supply `approvers` (identity -> token) or unset requireSecondPerson.",
+      );
+  }
+
   return startGatewayHttp({
     catalog: config.catalog,
     gatewayPublicKeyPem: config.gatewayPublicKeyPem,

@@ -215,6 +215,19 @@ test("e2e over real HTTP: a gateway with no admin token exposes no admin surface
   expect(r.status).toBe(404);
 });
 
+test("boot REFUSES an empty approver token — an empty token authenticates any caller (dual-control bypass)", async () => {
+  // A per-approver token from an unset env var / a secret store returning "" must
+  // fail closed at boot, not silently authenticate an unauthenticated caller as
+  // that approver (which would let anyone approve a requireSecondPerson call).
+  await expect(boot({ default: "allow", rules: [] }, { approvers: { "auditor@acme.com": "" } })).rejects.toThrow(
+    /empty|non-empty/i,
+  );
+});
+
+test("boot REFUSES an empty admin token", async () => {
+  await expect(boot({ default: "allow", rules: [] }, { adminToken: "" })).rejects.toThrow(/empty|non-empty/i);
+});
+
 test("e2e over real HTTP: DPoP-authenticated client runs a governed call end-to-end", async () => {
   const { gateway, url, audit } = await boot();
   const mcp = await connectClient(url, gateway.privateKey);

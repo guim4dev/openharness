@@ -92,6 +92,52 @@ test("loadGatewayServerConfig rejects a config missing keys", () => {
   expect(() => loadGatewayServerConfig(p)).toThrow();
 });
 
+/** Write a config that turns on requireSecondPerson; return the resolved config. */
+function writeSecondPersonConfig() {
+  dir = mkdtempSync(join(tmpdir(), "oh-gw-2p-"));
+  const keys = generateAuthKeypair();
+  writeFileSync(join(dir, "gw.pub"), keys.publicKey);
+  writeFileSync(join(dir, "gw.key"), keys.privateKey);
+  writeFileSync(join(dir, "policy.json"), JSON.stringify({ default: "allow", rules: [] }));
+  const config = {
+    host: "127.0.0.1",
+    keys: { publicKey: "gw.pub", privateKey: "gw.key" },
+    policy: "policy.json",
+    policyVersion: "1.0.0",
+    auditPath: "audit.log",
+    approval: { timeoutMs: 30000, requireSecondPerson: true },
+    catalog: [{ name: "github__list_issues", connectorId: "github", upstreamId: "github" }],
+    connectors: [{ id: "github", type: "github-read" }],
+  };
+  const p = join(dir, "gateway.json");
+  writeFileSync(p, JSON.stringify(config));
+  return { resolved: loadGatewayServerConfig(p), keys };
+}
+
+test("startGatewayFromConfig fails closed when requireSecondPerson is set but no per-approver tokens are configured", async () => {
+  const { resolved } = writeSecondPersonConfig();
+  const store = new InMemorySecretStore();
+  await store.set("upstream:github", "ghp_orgtoken");
+  // The shared admin identity can't be a distinct second person — refuse to boot
+  // rather than provide false dual control.
+  await expect(
+    startGatewayFromConfig(resolved, { secretStore: store, connectorFactories: { "github-read": stubGithub } }),
+  ).rejects.toThrow(/requireSecondPerson|second person|approver/i);
+});
+
+test("startGatewayFromConfig boots with requireSecondPerson when per-approver tokens ARE configured", async () => {
+  const { resolved, keys } = writeSecondPersonConfig();
+  const store = new InMemorySecretStore();
+  await store.set("upstream:github", "ghp_orgtoken");
+  running = await startGatewayFromConfig(resolved, {
+    secretStore: store,
+    approvers: { "boss@acme.com": "boss-tok" },
+    connectorFactories: { "github-read": stubGithub },
+  });
+  expect(running.url).toContain("http://127.0.0.1:");
+  void keys;
+});
+
 test("startGatewayFromConfig rejects an unknown connector type", async () => {
   dir = mkdtempSync(join(tmpdir(), "oh-gw-unk-"));
   const keys = generateAuthKeypair();

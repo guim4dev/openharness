@@ -119,7 +119,10 @@ function authenticateApprover(
   if (adminToken && bearerMatches(header, adminToken)) return "admin";
   if (approvers) {
     for (const [name, token] of Object.entries(approvers)) {
-      if (bearerMatches(header, token)) return name;
+      // `token &&` guards against an empty token matching an empty bearer (a "" vs
+      // "" constant-time compare is `true`). Boot-time validation also rejects
+      // empty approver tokens; this is defense in depth at the compare itself.
+      if (token && bearerMatches(header, token)) return name;
     }
   }
   return undefined;
@@ -186,6 +189,19 @@ export async function startGatewayHttp(opts: GatewayHttpOptions): Promise<Gatewa
   if (!tokenPath.startsWith("/")) throw new Error(`gateway tokenPath must start with "/" (got ${JSON.stringify(tokenPath)})`);
   if (opts.adminToken && !adminPath.startsWith("/"))
     throw new Error(`gateway adminPath must start with "/" (got ${JSON.stringify(adminPath)})`);
+  // Fail closed on an empty/blank approval token: a "" bearer expected reduces the
+  // constant-time compare to two zero-length buffers (always equal), so an empty
+  // token would authenticate ANY caller (including one with no Authorization
+  // header) as that identity. Reject at boot rather than silently authenticate —
+  // an unset env var / a secret store returning "" is a misconfig, not a credential.
+  if (opts.adminToken !== undefined && opts.adminToken.trim() === "")
+    throw new Error("gateway adminToken must be non-empty (an empty token would authenticate any caller)");
+  for (const [name, token] of Object.entries(opts.approvers ?? {})) {
+    if (typeof token !== "string" || token.trim() === "")
+      throw new Error(
+        `gateway approver ${JSON.stringify(name)} has an empty token — it would authenticate any caller; set a non-empty per-approver token or remove the entry`,
+      );
+  }
   // Route match with a boundary: exactly the path, or the path followed by a
   // query string — so `/token` does NOT also match `/tokenfoo` or `/token/x`.
   const routeIs = (u: string, base: string): boolean => u === base || u.startsWith(`${base}?`);
