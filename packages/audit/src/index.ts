@@ -254,5 +254,5 @@ export function verifyAuditLog(path: string, opts: FileAuditLogOptions = {}): Ve
 export { exportAuditLog, auditExportToNdjson } from "./export.ts";
 export type { AuditExport, AuditExportManifest, ExportFilter, ExportAuditLogOptions } from "./export.ts";
 
-export { createAuditShipper } from "./shipper.ts";
+export { createAuditShipper, httpAuditPush } from "./shipper.ts";
 export type { AuditShipper, AuditShipperOptions, AuditPush, AuditPushResult, ShipResult } from "./shipper.ts";

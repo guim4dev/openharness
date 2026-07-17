@@ -102,6 +102,40 @@ export interface AuditShipper {
   ackedSeq(): number;
 }
 
+/**
+ * HTTP transport for the shipper: POSTs NDJSON to `<serverUrl>/audit` for one
+ * `source`, and NEVER throws on a 4xx/5xx — it returns the status so the shipper
+ * can tell a fork (409) / corrupt record (400) from a transient failure. Uses the
+ * global `fetch` (Node 18+); no dependency on `@openharness/server` (which imports
+ * this package), so it stays cycle-free.
+ */
+export function httpAuditPush(serverUrl: string, source: string, token?: string): AuditPush {
+  return async (lines): Promise<AuditPushResult> => {
+    const body = lines.map((l) => (l.endsWith("\n") ? l : `${l}\n`)).join("");
+    try {
+      const res = await fetch(new URL("/audit", serverUrl), {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-ndjson",
+          "x-oh-source": source,
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+        },
+        body,
+      });
+      const text = await res.text().catch(() => "");
+      let ingested: number | undefined;
+      try {
+        ingested = (JSON.parse(text) as { ingested?: number }).ingested;
+      } catch {
+        /* non-JSON body */
+      }
+      return { status: res.status, ...(ingested !== undefined ? { ingested } : {}), ...(res.ok ? {} : { error: text }) };
+    } catch (e) {
+      return { status: 0, error: (e as Error)?.message ?? "network error" };
+    }
+  };
+}
+
 export function createAuditShipper(opts: AuditShipperOptions): AuditShipper {
   const statePath = opts.statePath ?? `${opts.logPath}.shipped.json`;
   const batchSize = opts.batchSize ?? 256;

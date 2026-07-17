@@ -20,8 +20,8 @@ import { loadGatewayTools } from "./gateway-bridge.ts";
 import type { GatewayAuth, LoadGatewayToolsOptions } from "./gateway-bridge.ts";
 import { checkModel } from "@openharness/policy";
 import type { Policy } from "@openharness/policy";
-import { createFileAuditLog } from "@openharness/audit";
-import type { AuditSink } from "@openharness/audit";
+import { createFileAuditLog, createAuditShipper, httpAuditPush } from "@openharness/audit";
+import type { AuditSink, AuditShipper, ShipResult } from "@openharness/audit";
 import { createOpenHarnessAuthStorage } from "./pi-auth-storage.ts";
 import { buildPolicyExtension } from "./policy-extension.ts";
 import { classify } from "./session.ts";
@@ -119,6 +119,24 @@ export interface CreateLiveSessionOptions {
    */
   auditPath?: string;
   /**
+   * Ship the local audit log to the authoritative server anchor. Only active
+   * when auditing is on (a policy is in effect AND `auditPath` is set). Records
+   * are shipped periodically (unref'd timer, never blocking a turn) and once more
+   * on `close()`. A fork/re-chain (409) surfaces via `onShipResult` (default:
+   * a loud `console.error`) — the shipper never advances its ack past a conflict.
+   */
+  auditServer?: {
+    url: string;
+    source: string;
+    token?: string;
+    /** Sidecar ack-state path. Default `<auditPath>.shipped.json`. */
+    statePath?: string;
+    /** Periodic flush interval (ms); 0 disables periodic (still flushes on close). Default 15000. */
+    intervalMs?: number;
+    /** Observe each ship result (esp. a `conflict` = integrity alarm). */
+    onShipResult?: (r: ShipResult) => void;
+  };
+  /**
    * Out-of-band approval resolver for policy `ask` decisions. When provided it
    * is threaded into the policy extension and takes precedence over the
    * in-process `ctx.ui.confirm` path (the desktop sidecar wires this to a WS
@@ -208,6 +226,39 @@ export async function createLiveSession(opts: CreateLiveSessionOptions): Promise
   // given. Kept off by default so hermetic sessions write nothing.
   const auditSink: AuditSink | undefined =
     policy && opts.auditPath ? createFileAuditLog(opts.auditPath) : undefined;
+
+  // Optional: ship the local audit log to the authoritative server anchor.
+  // Active only when auditing is on. The periodic timer is UNREF'd so it never
+  // keeps the process alive, and a flush NEVER throws into a turn — a conflict
+  // (fork/re-chain) is surfaced via onShipResult (default: a loud console.error).
+  let auditShipper: AuditShipper | undefined;
+  let shipTimer: ReturnType<typeof setInterval> | undefined;
+  if (auditSink && opts.auditPath && opts.auditServer) {
+    const as = opts.auditServer;
+    auditShipper = createAuditShipper({
+      logPath: opts.auditPath,
+      push: httpAuditPush(as.url, as.source, as.token),
+      ...(as.statePath ? { statePath: as.statePath } : {}),
+    });
+    const onResult =
+      as.onShipResult ??
+      ((r: ShipResult) => {
+        if (r.conflict) console.error(`[openharness/audit] integrity ALARM shipping to ${as.url}: ${r.conflict}`);
+      });
+    const flush = (): void => {
+      void auditShipper!
+        .flush()
+        .then(onResult)
+        .catch(() => {
+          /* transport hiccup: the next flush (or close) retries from the ack */
+        });
+    };
+    const intervalMs = as.intervalMs ?? 15_000;
+    if (intervalMs > 0) {
+      shipTimer = setInterval(flush, intervalMs);
+      shipTimer.unref?.();
+    }
+  }
   const policyExtension: InlineExtension[] = policy
     ? [
         buildPolicyExtension(policy, {
@@ -379,6 +430,19 @@ export async function createLiveSession(opts: CreateLiveSessionOptions): Promise
       session.dispose();
       await disposeMcp();
       await disposeGateway();
+      // Stop the periodic shipper and ship one final time so the session's tail
+      // reaches the anchor. Never let a ship error mask a clean close.
+      if (shipTimer) clearInterval(shipTimer);
+      if (auditShipper) {
+        try {
+          const r = await auditShipper.flush();
+          opts.auditServer?.onShipResult?.(r);
+          if (r.conflict && !opts.auditServer?.onShipResult)
+            console.error(`[openharness/audit] integrity ALARM shipping to ${opts.auditServer?.url}: ${r.conflict}`);
+        } catch {
+          /* best-effort final ship */
+        }
+      }
       await auditSink?.close?.();
     },
   };

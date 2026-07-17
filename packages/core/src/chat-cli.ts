@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { chmodSync, readFileSync, writeFileSync } from "node:fs";
-import { auditExportToNdjson, createAuditShipper, exportAuditLog, verifyAuditLog, type AuditPush } from "@openharness/audit";
+import { auditExportToNdjson, createAuditShipper, exportAuditLog, httpAuditPush, verifyAuditLog } from "@openharness/audit";
 import { buildHarnessApp } from "@openharness/build";
 import {
   BundleVerificationError,
@@ -114,34 +114,11 @@ async function main(): Promise<void> {
         process.stderr.write("usage: openharness audit push <file> --server <url> [--source id] [--state path] [--token t]\n");
         process.exit(2);
       }
-      // HTTP transport for the shipper: never throws on 4xx/5xx — it returns the
-      // status so the shipper can tell a fork (409) / corrupt record (400) from a
-      // transient failure (5xx / network).
-      const push: AuditPush = async (lines) => {
-        const body = lines.map((l) => (l.endsWith("\n") ? l : `${l}\n`)).join("");
-        try {
-          const res = await fetch(new URL("/audit", server), {
-            method: "POST",
-            headers: {
-              "content-type": "application/x-ndjson",
-              "x-oh-source": source,
-              ...(token ? { authorization: `Bearer ${token}` } : {}),
-            },
-            body,
-          });
-          const text = await res.text().catch(() => "");
-          let ingested: number | undefined;
-          try {
-            ingested = (JSON.parse(text) as { ingested?: number }).ingested;
-          } catch {
-            /* non-JSON body */
-          }
-          return { status: res.status, ...(ingested !== undefined ? { ingested } : {}), ...(res.ok ? {} : { error: text }) };
-        } catch (e) {
-          return { status: 0, error: (e as Error)?.message ?? "network error" };
-        }
-      };
-      const shipper = createAuditShipper({ logPath: file, push, ...(statePath ? { statePath } : {}) });
+      const shipper = createAuditShipper({
+        logPath: file,
+        push: httpAuditPush(server, source, token),
+        ...(statePath ? { statePath } : {}),
+      });
       const r = await shipper.flush();
       if (r.ok) {
         process.stdout.write(`shipped ${r.shipped} record(s) to ${server} (source=${source}, ackedSeq=${r.ackedSeq})\n`);
