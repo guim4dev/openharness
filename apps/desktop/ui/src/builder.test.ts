@@ -7,6 +7,7 @@ import {
   draftIsValid,
   draftToManifest,
   draftToPolicy,
+  draftToSkillContents,
   emptyDraft,
   useBuilder,
   validateDraft,
@@ -29,7 +30,7 @@ const filled: BuilderDraft = {
   credentialProfile: "work",
   policyDefault: "deny",
   rules: [{ match: "mcp__github__*", action: "ask" }],
-  skills: [{ path: "skills/triage", mandatory: true }],
+  skills: [{ path: "skills/triage", mandatory: true, content: "# Triage\n\nHow the agent triages an incoming report.\n" }],
   mcpServers: [{ name: "github", transport: "stdio", command: "npx", url: "", tools: "list_issues, create_issue" }],
 };
 
@@ -47,6 +48,20 @@ describe("builderReducer", () => {
     expect(set.rules[0]).toEqual({ match: "bash", action: "deny" });
     const removed = edit(set, { type: "removeRule", index: 0 });
     expect(removed.rules).toHaveLength(0);
+  });
+
+  test("add / update / remove skills (including the SKILL.md body)", () => {
+    const withSkill = edit(emptyDraft, { type: "addSkill" });
+    expect(withSkill.skills).toHaveLength(1);
+    expect(withSkill.skills[0]).toEqual({ path: "", mandatory: true, content: "" });
+    const set = edit(
+      withSkill,
+      { type: "updateSkill", index: 0, patch: { path: "skills/triage", mandatory: false } },
+      { type: "updateSkill", index: 0, patch: { content: "# Triage\n\nbody" } },
+    );
+    expect(set.skills[0]).toEqual({ path: "skills/triage", mandatory: false, content: "# Triage\n\nbody" });
+    const removed = edit(set, { type: "removeSkill", index: 0 });
+    expect(removed.skills).toHaveLength(0);
   });
 
   test("load replaces the whole draft", () => {
@@ -104,12 +119,24 @@ describe("serialization", () => {
   test("round-trips the edited fields: manifest -> draft -> manifest", () => {
     const manifest = draftToManifest(filled);
     const policy = draftToPolicy(filled);
-    const back = draftFromManifest(manifest, policy, filled.systemPrompt);
+    // Skill bodies travel alongside the manifest (they live in <path>/SKILL.md,
+    // not harness.json), so a faithful round-trip must feed them back in.
+    const back = draftFromManifest(manifest, policy, filled.systemPrompt, draftToSkillContents(filled));
     expect(draftToManifest(back)).toEqual(manifest);
     expect(draftToPolicy(back)).toEqual(policy);
     // The edited fields survived (carry is an internal passthrough, not compared).
     const { carry: _c, ...editable } = back;
     expect(editable).toEqual(filled);
+  });
+
+  test("draftFromManifest folds each declared skill's SKILL.md body back in (by path)", () => {
+    const manifest = draftToManifest(filled);
+    const body = "# Triage\n\nHow the agent triages an incoming report.\n";
+    const back = draftFromManifest(manifest, undefined, "prompt text", [{ path: "skills/triage", content: body }]);
+    expect(back.skills).toEqual([{ path: "skills/triage", mandatory: true, content: body }]);
+    // A declared skill with no matching content entry loads with an empty body.
+    const orphan = draftFromManifest(manifest, undefined, "prompt text");
+    expect(orphan.skills[0].content).toBe("");
   });
 
   test("preserves un-edited manifest fields (gateway pin, version, extra providers) across a round-trip", () => {
@@ -172,7 +199,7 @@ describe("validateDraft", () => {
   });
 
   test("flags a skill with no path", () => {
-    const d: BuilderDraft = { ...filled, skills: [{ path: "", mandatory: true }] };
+    const d: BuilderDraft = { ...filled, skills: [{ path: "", mandatory: true, content: "" }] };
     expect(validateDraft(d).some((p) => p.field === "skills.0.path")).toBe(true);
   });
 

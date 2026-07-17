@@ -44,13 +44,23 @@ export type ServerMessage =
   /** The names of saved definitions (response to `list_definitions`). */
   | { type: "definitions_listed"; names: string[] }
   /** A saved definition's raw files to reopen in the builder (or an `error`). */
-  | { type: "definition_loaded"; name: string; manifest?: unknown; policy?: unknown; systemPrompt?: string; error?: string };
+  | {
+      type: "definition_loaded";
+      name: string;
+      manifest?: unknown;
+      policy?: unknown;
+      systemPrompt?: string;
+      skills?: { path: string; content: string }[];
+      error?: string;
+    };
 
 export interface LoadedDefinition {
   name: string;
   manifest: Record<string, unknown>;
   policy?: Record<string, unknown>;
   systemPrompt: string;
+  /** Each declared skill's SKILL.md body (by path), for the builder to fold back in. */
+  skills?: { path: string; content: string }[];
 }
 
 export interface SaveProblem {
@@ -300,6 +310,7 @@ function applyServerEvent(state: ChatState, event: ServerMessage): ChatState {
           manifest: event.manifest as Record<string, unknown>,
           ...(event.policy ? { policy: event.policy as Record<string, unknown> } : {}),
           systemPrompt: event.systemPrompt ?? "",
+          ...(event.skills ? { skills: event.skills } : {}),
         },
       };
     }
@@ -367,7 +378,13 @@ export interface UseChat {
    */
   submitCredential: (secret: string) => void;
   /** Persist a visual-builder definition via the sidecar (no-op until connected). */
-  saveDefinition: (input: { name: string; manifest: unknown; policy?: unknown; systemPrompt: string }) => void;
+  saveDefinition: (input: {
+    name: string;
+    manifest: unknown;
+    policy?: unknown;
+    systemPrompt: string;
+    skills?: { path: string; content: string }[];
+  }) => void;
   /** The most recent save outcome, once a `definition_saved` frame has arrived. */
   saveResult?: SaveResult;
   /** Request the list of saved definitions (populates `availableDefinitions`). */
@@ -433,7 +450,13 @@ export function useChat(connection: Connection | null): UseChat {
   }, []);
 
   const saveDefinition = useCallback(
-    (input: { name: string; manifest: unknown; policy?: unknown; systemPrompt: string }) => {
+    (input: {
+      name: string;
+      manifest: unknown;
+      policy?: unknown;
+      systemPrompt: string;
+      skills?: { path: string; content: string }[];
+    }) => {
       const socket = socketRef.current;
       if (!socket || socket.readyState !== WebSocket.OPEN) return;
       socket.send(JSON.stringify({ type: "save_definition", ...input }));

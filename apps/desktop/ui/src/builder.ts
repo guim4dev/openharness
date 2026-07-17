@@ -21,6 +21,8 @@ export interface BuilderRule {
 export interface BuilderSkill {
   path: string;
   mandatory: boolean;
+  /** Full SKILL.md content (frontmatter + body) written to `<path>/SKILL.md` on save. */
+  content: string;
 }
 
 export interface BuilderMcpServer {
@@ -96,7 +98,7 @@ export type BuilderAction =
   | { type: "load"; draft: BuilderDraft };
 
 const NEW_RULE: BuilderRule = { match: "", action: "deny" };
-const NEW_SKILL: BuilderSkill = { path: "", mandatory: true };
+const NEW_SKILL: BuilderSkill = { path: "", mandatory: true, content: "" };
 const NEW_MCP: BuilderMcpServer = { name: "", transport: "stdio", command: "", url: "", tools: "" };
 
 function replaceAt<T>(list: T[], index: number, patch: Partial<T>): T[] {
@@ -195,6 +197,16 @@ export function draftToManifest(draft: BuilderDraft): Record<string, unknown> {
   return manifest;
 }
 
+/**
+ * The inline SKILL.md payload for a draft — `{ path, content }` per declared
+ * skill, the shape `writeHarnessDefinition`'s `skills` expects. The manifest
+ * carries `{ path, mandatory }`; the body travels here so the sidecar can write
+ * `<path>/SKILL.md`.
+ */
+export function draftToSkillContents(draft: BuilderDraft): { path: string; content: string }[] {
+  return draft.skills.map((s) => ({ path: s.path, content: s.content }));
+}
+
 /** The `policy.json` object for a draft. */
 export function draftToPolicy(draft: BuilderDraft): Record<string, unknown> {
   return {
@@ -203,17 +215,24 @@ export function draftToPolicy(draft: BuilderDraft): Record<string, unknown> {
   };
 }
 
-/** Load an existing manifest (+ optional policy + prompt text) into an editable draft. */
+/**
+ * Load an existing manifest (+ optional policy + prompt text + skill bodies) into
+ * an editable draft. `skillContents` supplies each declared skill's SKILL.md body
+ * (matched by path) so a load→edit→save round-trip preserves it; a skill with no
+ * matching entry loads with an empty body.
+ */
 export function draftFromManifest(
   manifest: Record<string, unknown>,
   policy?: Record<string, unknown>,
   systemPromptText = "",
+  skillContents?: { path: string; content: string }[],
 ): BuilderDraft {
   const branding = (manifest.branding ?? {}) as Record<string, unknown>;
   const providers = (manifest.providers ?? {}) as Record<string, unknown>;
   const def = (providers.default ?? {}) as Record<string, unknown>;
   const rawRules = Array.isArray(policy?.rules) ? (policy!.rules as Record<string, unknown>[]) : [];
   const rawSkills = Array.isArray(manifest.skills) ? (manifest.skills as Record<string, unknown>[]) : [];
+  const contentByPath = new Map((skillContents ?? []).map((s) => [s.path, s.content]));
   const mcpServers = ((manifest.mcp as Record<string, unknown>)?.servers ?? {}) as Record<string, Record<string, unknown>>;
   return {
     name: String(manifest.name ?? ""),
@@ -225,7 +244,10 @@ export function draftFromManifest(
     credentialProfile: String(def.credentialProfile ?? emptyDraft.credentialProfile),
     policyDefault: (policy?.default as PolicyAction) ?? "deny",
     rules: rawRules.map((r) => ({ match: String(r.match ?? ""), action: (r.action as PolicyAction) ?? "deny" })),
-    skills: rawSkills.map((s) => ({ path: String(s.path ?? ""), mandatory: Boolean(s.mandatory) })),
+    skills: rawSkills.map((s) => {
+      const path = String(s.path ?? "");
+      return { path, mandatory: Boolean(s.mandatory), content: contentByPath.get(path) ?? "" };
+    }),
     mcpServers: Object.entries(mcpServers).map(([name, spec]) => ({
       name,
       transport: (spec.transport as McpTransport) ?? "stdio",

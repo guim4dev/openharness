@@ -54,6 +54,31 @@ test("adding a skill and an MCP server flows into the live harness.json", () => 
   expect(manifest.textContent).toContain('"transport": "stdio"');
 });
 
+test("editing a skill's SKILL.md body threads it into the onSave skills payload", () => {
+  const calls: {
+    name: string;
+    manifest: unknown;
+    policy: unknown;
+    systemPrompt: string;
+    skills: { path: string; content: string }[];
+  }[] = [];
+  render(<BuilderPanel onSave={(input) => calls.push(input)} canSave />);
+
+  // Fill the required fields so the draft is valid and Save enables.
+  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "acme-assistant" } });
+  fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Acme Assistant" } });
+  fireEvent.change(screen.getByLabelText("System prompt"), { target: { value: "You are governed." } });
+
+  fireEvent.click(screen.getByText("+ Add skill"));
+  fireEvent.change(screen.getByLabelText("Skill 1 path"), { target: { value: "skills/triage" } });
+  const body = "---\nname: triage\n---\n\n# Triage\n\nSteps.";
+  fireEvent.change(screen.getByLabelText("Skill 1 content"), { target: { value: body } });
+
+  fireEvent.click(screen.getByText("Save & verify"));
+  expect(calls).toHaveLength(1);
+  expect(calls[0].skills).toEqual([{ path: "skills/triage", content: body }]);
+});
+
 test("switching an MCP server to http swaps the command field for a url field", () => {
   render(<BuilderPanel />);
   fireEvent.click(screen.getByText("+ Add MCP server"));

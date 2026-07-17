@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { WebSocketServer } from "ws";
 import type { WebSocket } from "ws";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { configDir, createLiveSession, persistOnboardedAccount, runDoctor } from "@openharness/core";
 import type { CreateLiveSessionOptions, DoctorProblem, LiveSession } from "@openharness/core";
 import { writeHarnessDefinition, MaterializeError } from "@openharness/definition";
@@ -30,9 +30,16 @@ export type ClientMessage =
    * to a computed, name-derived directory under the app's config dir (no file
    * dialog), runs `doctor`, and replies `definition_saved`. `manifest`/`policy`
    * are the `harness.json`/`policy.json` objects; `systemPrompt` becomes
-   * `system-prompt.md`.
+   * `system-prompt.md`; each `skills` entry becomes `<path>/SKILL.md`.
    */
-  | { type: "save_definition"; name: string; manifest: unknown; policy?: unknown; systemPrompt: string }
+  | {
+      type: "save_definition";
+      name: string;
+      manifest: unknown;
+      policy?: unknown;
+      systemPrompt: string;
+      skills?: { path: string; content: string }[];
+    }
   /** Ask for the names of previously-saved definitions (to reopen one in the builder). */
   | { type: "list_definitions" }
   /** Load a saved definition's raw files back into the builder for editing. */
@@ -80,7 +87,15 @@ export type ServerMessage =
   /** The saved-definition names, in response to `list_definitions`. */
   | { type: "definitions_listed"; names: string[] }
   /** A saved definition's raw files, in response to `load_definition` (or an `error`). */
-  | { type: "definition_loaded"; name: string; manifest?: unknown; policy?: unknown; systemPrompt?: string; error?: string };
+  | {
+      type: "definition_loaded";
+      name: string;
+      manifest?: unknown;
+      policy?: unknown;
+      systemPrompt?: string;
+      skills?: { path: string; content: string }[];
+      error?: string;
+    };
 
 export interface SidecarHandle {
   /** Ephemeral loopback port the WS server is listening on. */
@@ -160,7 +175,13 @@ export interface SaveDefinitionResult {
  * testable — no WebSocket, no file dialog.
  */
 export async function saveDefinition(
-  input: { name: string; manifest: unknown; policy?: unknown; systemPrompt: string },
+  input: {
+    name: string;
+    manifest: unknown;
+    policy?: unknown;
+    systemPrompt: string;
+    skills?: { path: string; content: string }[];
+  },
   opts: { baseDir: string },
 ): Promise<SaveDefinitionResult> {
   const safe = input.name.trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
@@ -173,6 +194,7 @@ export async function saveDefinition(
       manifest: input.manifest,
       ...(input.policy !== undefined ? { policy: input.policy } : {}),
       systemPrompt: input.systemPrompt,
+      ...(input.skills !== undefined ? { skills: input.skills } : {}),
     });
   } catch (e) {
     const error = e instanceof MaterializeError ? e.message : ((e as Error)?.message ?? "failed to write definition");
@@ -186,6 +208,8 @@ export interface LoadedDefinition {
   manifest: Record<string, unknown>;
   policy?: Record<string, unknown>;
   systemPrompt: string;
+  /** Each declared skill's SKILL.md body, keyed by its manifest `path`. */
+  skills: { path: string; content: string }[];
 }
 
 /** Names of definitions the builder saved under `baseDir` (subdirs with a harness.json). */
@@ -199,14 +223,18 @@ export function listDefinitions(baseDir: string): string[] {
 
 /**
  * Read a saved definition's RAW files (`harness.json` + optional `policy.json` +
- * `system-prompt.md`) so the visual builder can reopen and edit it. The name is
- * sanitized to `[a-z0-9-]` (same as the save path) so it can't traverse out of
- * `baseDir`. Pure and testable.
+ * `system-prompt.md` + each declared skill's `<path>/SKILL.md`) so the visual
+ * builder can reopen and edit it. The name is sanitized to `[a-z0-9-]` (same as
+ * the save path) so it can't traverse out of `baseDir`, and each skill path is
+ * containment-checked against the definition dir (same fail-closed rule
+ * `writeHarnessDefinition` applies on write) so a hostile manifest can't read a
+ * file from outside the definition. Pure and testable.
  */
 export function loadDefinitionForEdit(baseDir: string, name: string): LoadedDefinition {
   const safe = name.trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
   if (!safe) throw new Error("invalid definition name");
   const dir = join(baseDir, safe);
+  const root = resolve(dir);
   const manifest = JSON.parse(readFileSync(join(dir, "harness.json"), "utf8")) as Record<string, unknown>;
   const policyPath = join(dir, "policy.json");
   const policy = existsSync(policyPath)
@@ -214,7 +242,19 @@ export function loadDefinitionForEdit(baseDir: string, name: string): LoadedDefi
     : undefined;
   const promptPath = join(dir, "system-prompt.md");
   const systemPrompt = existsSync(promptPath) ? readFileSync(promptPath, "utf8") : "";
-  return { manifest, ...(policy ? { policy } : {}), systemPrompt };
+  const rawSkills = Array.isArray(manifest.skills) ? (manifest.skills as Record<string, unknown>[]) : [];
+  const skills: { path: string; content: string }[] = [];
+  for (const s of rawSkills) {
+    const path = String(s.path ?? "");
+    if (!path) continue;
+    const skillMd = resolve(root, path, "SKILL.md");
+    if (skillMd !== root && !skillMd.startsWith(root + sep)) {
+      throw new Error(`skill path '${path}' resolves OUTSIDE the definition dir — refusing to read it`);
+    }
+    const content = existsSync(skillMd) ? readFileSync(skillMd, "utf8") : "";
+    skills.push({ path, content });
+  }
+  return { manifest, ...(policy ? { policy } : {}), systemPrompt, skills };
 }
 
 function send(socket: WebSocket, message: ServerMessage): void {
@@ -435,7 +475,13 @@ export async function startSidecar(opts: StartSidecarOptions): Promise<SidecarHa
       // readiness — you can author a harness even before this one is configured.
       if (isSaveDefinition(parsed)) {
         void saveDefinition(
-          { name: parsed.name, manifest: parsed.manifest, policy: parsed.policy, systemPrompt: parsed.systemPrompt },
+          {
+            name: parsed.name,
+            manifest: parsed.manifest,
+            policy: parsed.policy,
+            systemPrompt: parsed.systemPrompt,
+            skills: parsed.skills,
+          },
           { baseDir: join(configDir(), "definitions") },
         )
           .then((result) => send(socket, { type: "definition_saved", ...result }))

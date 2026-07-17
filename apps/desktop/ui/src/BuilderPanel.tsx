@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { draftFromManifest, useBuilder, type PolicyAction } from "./builder.ts";
+import { draftFromManifest, draftToSkillContents, useBuilder, type PolicyAction } from "./builder.ts";
 import type { LoadedDefinition, SaveResult } from "./chat.ts";
 
 /**
@@ -13,7 +13,13 @@ const ACTIONS: PolicyAction[] = ["allow", "deny", "ask"];
 export interface BuilderPanelProps {
   onClose?: () => void;
   /** Persist the current draft (sends it to the sidecar). Absent → no save affordance. */
-  onSave?: (input: { name: string; manifest: unknown; policy: unknown; systemPrompt: string }) => void;
+  onSave?: (input: {
+    name: string;
+    manifest: unknown;
+    policy: unknown;
+    systemPrompt: string;
+    skills: { path: string; content: string }[];
+  }) => void;
   /** Whether saving is currently possible (connected to the sidecar). */
   canSave?: boolean;
   /** The last save outcome to surface (from the sidecar's `definition_saved`). */
@@ -51,7 +57,14 @@ export function BuilderPanel({
   useEffect(() => {
     if (loadedDefinition && loadedDefinition !== appliedRef.current) {
       appliedRef.current = loadedDefinition;
-      b.load(draftFromManifest(loadedDefinition.manifest, loadedDefinition.policy, loadedDefinition.systemPrompt));
+      b.load(
+        draftFromManifest(
+          loadedDefinition.manifest,
+          loadedDefinition.policy,
+          loadedDefinition.systemPrompt,
+          loadedDefinition.skills,
+        ),
+      );
     }
   }, [loadedDefinition, b]);
 
@@ -190,25 +203,34 @@ export function BuilderPanel({
           <fieldset className="builder-rules">
             <legend>Skills</legend>
             {b.draft.skills.map((skill, i) => (
-              <div className="builder-rule" key={i}>
-                <input
-                  aria-label={`Skill ${i + 1} path`}
-                  value={skill.path}
-                  onChange={(e) => b.updateSkill(i, { path: e.target.value })}
-                  placeholder="skills/triage"
-                />
-                <label className="builder-check">
+              <div className="builder-mcp" key={i}>
+                <div className="builder-rule">
                   <input
-                    type="checkbox"
-                    aria-label={`Skill ${i + 1} mandatory`}
-                    checked={skill.mandatory}
-                    onChange={(e) => b.updateSkill(i, { mandatory: e.target.checked })}
+                    aria-label={`Skill ${i + 1} path`}
+                    value={skill.path}
+                    onChange={(e) => b.updateSkill(i, { path: e.target.value })}
+                    placeholder="skills/triage"
                   />
-                  mandatory
-                </label>
-                <button type="button" aria-label={`Remove skill ${i + 1}`} onClick={() => b.removeSkill(i)}>
-                  ✕
-                </button>
+                  <label className="builder-check">
+                    <input
+                      type="checkbox"
+                      aria-label={`Skill ${i + 1} mandatory`}
+                      checked={skill.mandatory}
+                      onChange={(e) => b.updateSkill(i, { mandatory: e.target.checked })}
+                    />
+                    mandatory
+                  </label>
+                  <button type="button" aria-label={`Remove skill ${i + 1}`} onClick={() => b.removeSkill(i)}>
+                    ✕
+                  </button>
+                </div>
+                <textarea
+                  aria-label={`Skill ${i + 1} content`}
+                  rows={4}
+                  value={skill.content}
+                  onChange={(e) => b.updateSkill(i, { content: e.target.value })}
+                  placeholder={"---\nname: triage\ndescription: When to triage…\n---\n\n# Triage\n\nSteps the agent follows."}
+                />
               </div>
             ))}
             <button type="button" className="builder-add-rule" onClick={() => b.addSkill()}>
@@ -298,7 +320,13 @@ export function BuilderPanel({
                 className="builder-save-btn"
                 disabled={!b.valid || !canSave}
                 onClick={() =>
-                  onSave({ name: b.draft.name, manifest: b.manifest, policy: b.policy, systemPrompt: b.draft.systemPrompt })
+                  onSave({
+                    name: b.draft.name,
+                    manifest: b.manifest,
+                    policy: b.policy,
+                    systemPrompt: b.draft.systemPrompt,
+                    skills: draftToSkillContents(b.draft),
+                  })
                 }
               >
                 {canSave ? "Save & verify" : "Connecting…"}

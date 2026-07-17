@@ -68,6 +68,42 @@ test("save → list → load round-trips a definition back into an editable payl
   expect(loaded.systemPrompt).toContain("You are governed.");
 });
 
+test("save → reopen preserves each declared skill's SKILL.md body byte-for-byte", async () => {
+  const withSkills = {
+    ...manifest,
+    skills: [
+      { path: "skills/triage", mandatory: true },
+      { path: "skills/report", mandatory: false },
+    ],
+  };
+  // Bodies already end with a newline, so writeHarnessDefinition adds none — the
+  // reopen must return them unchanged, character for character.
+  const triageBody = "---\nname: triage\ndescription: Triage a report.\n---\n\n# Triage\n\nDo X then Y.\n";
+  const reportBody = "# Report\n\nSummarize findings.\n";
+  const save = await saveDefinition(
+    {
+      name: "acme-assistant",
+      manifest: withSkills,
+      policy,
+      systemPrompt: "You are governed.",
+      skills: [
+        { path: "skills/triage", content: triageBody },
+        { path: "skills/report", content: reportBody },
+      ],
+    },
+    { baseDir: base },
+  );
+  expect(save.error).toBeUndefined();
+  // The SKILL.md files were really written under the definition dir.
+  expect(await readFile(join(save.dir, "skills", "triage", "SKILL.md"), "utf8")).toBe(triageBody);
+
+  const loaded = loadDefinitionForEdit(base, "acme-assistant");
+  expect(loaded.skills).toEqual([
+    { path: "skills/triage", content: triageBody },
+    { path: "skills/report", content: reportBody },
+  ]);
+});
+
 test("listDefinitions is empty for a missing dir and ignores non-definition subdirs", async () => {
   expect(listDefinitions(join(base, "does-not-exist"))).toEqual([]);
 });
