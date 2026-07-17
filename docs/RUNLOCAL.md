@@ -283,6 +283,29 @@ npm run dev:desktop
 > "Not connected" state (rather than crashing). Running the binary from a
 > terminal — where `node` is on PATH — always works.
 
+> **Known issue — macOS 26 (Tahoe) intermittent launch crash.** On macOS 26 a
+> packaged app can abort *at launch* with `panic in a function that cannot
+> unwind` inside `tao::…::did_finish_launching` (SIGABRT, before any of our code
+> runs). This is an **upstream** Tauri/tao incompatibility with Tahoe
+> ([tao#1171](https://github.com/tauri-apps/tao/issues/1171)), not a bug in the
+> harness — a foreign Objective-C exception unwinds through tao's `extern "C"`
+> launch callback, so the Rust panic line is uninformative (there is no Rust
+> message). It is **intermittent** and specific to the LaunchServices path
+> (Finder / `open`), so a relaunch often succeeds. To capture the *real* reason
+> (the technique that actually diagnoses it), run under lldb and break on the
+> ObjC throw:
+>
+> ```bash
+> lldb -b -o "breakpoint set -n objc_exception_throw" -o run \
+>   -o "po (id)$x0" -o "expression -O -- (id)[(id)$x0 reason]" \
+>   /Applications/<App>.app/Contents/MacOS/<binary>
+> ```
+>
+> A `reason` mentioning `lockFocus` / `size zero` means a bad `.icns` (regenerate
+> with `cargo tauri icon`); our shipped icon set is already complete and valid.
+> There is no released tao fix yet, so pinning/bumping the dependency does not
+> help today — track the issue upstream.
+
 ## 7. Clean up
 
 ```bash
