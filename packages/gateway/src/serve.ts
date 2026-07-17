@@ -45,6 +45,13 @@ export interface StartGatewayFromConfigOptions {
    */
   sandbox?: { host: SandboxHost; descriptors: Record<string, ConnectorDescriptor> };
   /**
+   * Out-of-band admin bearer token for the approval surface (deploy hardening —
+   * server-side approval). When set, `GET/POST <adminPath>/approvals` are mounted
+   * so a policy `ask` is answerable over HTTP. Comes from the environment
+   * (`OPENHARNESS_GATEWAY_ADMIN_TOKEN`), never the config file.
+   */
+  adminToken?: string;
+  /**
    * Extra/override connector factories by `type`, merged OVER the built-in
    * registry. Lets a deployment register a private connector, and lets a test
    * inject a stubbed one so no real upstream is reached. A `type` present here
@@ -99,6 +106,7 @@ export async function startGatewayFromConfig(
     ...(idp ? { idp } : {}),
     ...(tx?.tokenPath ? { tokenPath: tx.tokenPath } : {}),
     ...(tx?.ttlMs ? { tokenTtlMs: tx.ttlMs } : {}),
+    ...(opts.adminToken ? { adminToken: opts.adminToken } : {}),
     pipeline: {
       policy: config.policy,
       policyVersion: config.policyVersion,

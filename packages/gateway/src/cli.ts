@@ -108,7 +108,11 @@ export async function main(argv: string[]): Promise<void> {
   const config = loadGatewayServerConfig(configPath);
   const secretsDir = secretsDirFor(argv, join(dirname(configPath), "secrets"));
   const secretStore = await EncryptedFileSecretStore.open(secretsDir);
-  const server = await startGatewayFromConfig(config, { secretStore });
+  const adminToken = process.env.OPENHARNESS_GATEWAY_ADMIN_TOKEN;
+  const server = await startGatewayFromConfig(config, {
+    secretStore,
+    ...(adminToken ? { adminToken } : {}),
+  });
   console.log(`[openharness-gateway] listening at ${server.url}`);
 
   const shutdown = (): void => {

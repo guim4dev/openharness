@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { timingSafeEqual } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createReplayGuard, isDeny, signServerAuth } from "./auth.ts";
 import { dpopFromHttp, SERVER_AUTH_HEADER } from "./dpop-http.ts";
@@ -46,6 +47,18 @@ export interface GatewayHttpOptions {
   tokenPath?: string;
   /** Minted-token lifetime in ms (default 5 min). */
   tokenTtlMs?: number;
+  /**
+   * Approval admin surface (fail-closed server-side approval). When set, a
+   * distinct admin bearer token gates `GET <adminPath>/approvals` (the pending
+   * list, server-rendered) and `POST <adminPath>/approvals/<id>` ({approved,
+   * by?}) to resolve them — so a policy `ask` over the deployable HTTP entry is
+   * answerable instead of always timing out to deny. Omit to leave `ask` on the
+   * timeout-deny default. This token is NOT a DPoP token; it is an out-of-band
+   * operator credential.
+   */
+  adminToken?: string;
+  /** Approval admin path prefix (default "/admin"). */
+  adminPath?: string;
   /** Where non-fatal errors (request failures, cleanup failures) are logged. Default: console.error. */
   logger?: (message: string, err?: unknown) => void;
 }
@@ -69,14 +82,57 @@ function serverError(res: ServerResponse): void {
   }
 }
 
+function sendJson(res: ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, { "content-type": "application/json" });
+  res.end(JSON.stringify(body));
+}
+
+/** Constant-time bearer check — no length leak, no early return on mismatch. */
+function bearerMatches(header: string | undefined, expected: string): boolean {
+  const got = header?.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
+  const a = Buffer.from(got);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+/** Read a JSON request body up to a small cap (admin actions are tiny). */
+async function readJsonBody(req: IncomingMessage, capBytes = 64 * 1024): Promise<unknown> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let over = false;
+    req.on("data", (c: Buffer) => {
+      size += c.length;
+      if (size > capBytes) {
+        over = true;
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on("end", () => {
+      if (over) return resolve(undefined);
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      } catch {
+        resolve(undefined);
+      }
+    });
+    req.on("error", () => resolve(undefined));
+  });
+}
+
 export async function startGatewayHttp(opts: GatewayHttpOptions): Promise<GatewayHttpServer> {
   const path = opts.path ?? "/mcp";
   const tokenPath = opts.tokenPath ?? "/token";
   // A path must be a real absolute route. An empty string would make every
   // `startsWith` match — silently shadowing every route (e.g. tokenPath:"" would
   // route every POST into the token exchange, making /mcp unreachable).
+  const adminPath = opts.adminPath ?? "/admin";
   if (!path.startsWith("/")) throw new Error(`gateway path must start with "/" (got ${JSON.stringify(path)})`);
   if (!tokenPath.startsWith("/")) throw new Error(`gateway tokenPath must start with "/" (got ${JSON.stringify(tokenPath)})`);
+  if (opts.adminToken && !adminPath.startsWith("/"))
+    throw new Error(`gateway adminPath must start with "/" (got ${JSON.stringify(adminPath)})`);
   // Route match with a boundary: exactly the path, or the path followed by a
   // query string — so `/token` does NOT also match `/tokenfoo` or `/token/x`.
   const routeIs = (u: string, base: string): boolean => u === base || u.startsWith(`${base}?`);
@@ -128,6 +184,40 @@ export async function startGatewayHttp(opts: GatewayHttpOptions): Promise<Gatewa
       res.end(
         JSON.stringify({ access_token: result.token, token_type: "DPoP", expires_in: Math.floor(result.expiresInMs / 1000) }),
       );
+      return;
+    }
+
+    // 0b. Approval admin surface (fail-closed server-side approval). Gated by the
+    //     out-of-band admin bearer (NOT DPoP). Only mounted when an admin token
+    //     is set. `GET <adminPath>/approvals` lists the server-rendered pending
+    //     items; `POST <adminPath>/approvals/<id>` resolves one.
+    if (opts.adminToken && url.startsWith(`${adminPath}/approvals`)) {
+      if (!bearerMatches(hdr(req.headers as Record<string, string | undefined>, "authorization"), opts.adminToken)) {
+        sendJson(res, 401, { error: "unauthorized" });
+        return;
+      }
+      const method = (req.method ?? "").toUpperCase();
+      const rest = url.slice(`${adminPath}/approvals`.length).split("?")[0];
+      if (method === "GET" && (rest === "" || rest === "/")) {
+        sendJson(res, 200, { pending: opts.pipeline.approval?.pending() ?? [] });
+        return;
+      }
+      const idMatch = /^\/([^/?]+)$/.exec(rest);
+      if (method === "POST" && idMatch) {
+        const body = (await readJsonBody(req)) as { approved?: unknown; by?: unknown } | undefined;
+        if (!body || typeof body.approved !== "boolean") {
+          sendJson(res, 400, { error: "body must be { approved: boolean, by?: string }" });
+          return;
+        }
+        if (!opts.pipeline.approval) {
+          sendJson(res, 404, { error: "no approval queue configured" });
+          return;
+        }
+        opts.pipeline.approval.resolve(idMatch[1], body.approved, typeof body.by === "string" ? body.by : undefined);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+      sendJson(res, 404, { error: "not found" });
       return;
     }
 

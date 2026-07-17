@@ -74,6 +74,88 @@ async function connectClient(url: string, gatewayPrivateKey: string, pinnedPubke
   return mcp;
 }
 
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+test("e2e over real HTTP: a policy `ask` is answered via the admin approval surface", async () => {
+  const ADMIN = "admin-secret-token";
+  const { gateway, url, audit } = await boot(
+    { default: "allow", rules: [{ match: "github__*", action: "ask" }] },
+    { adminToken: ADMIN },
+  );
+  const adminBase = url.replace("/mcp", "/admin/approvals");
+  const mcp = await connectClient(url, gateway.privateKey, gateway.publicKey);
+  try {
+    // Fire the governed call; it suspends server-side on the `ask` decision.
+    const callP = mcp.callTool({ name: "github__list_issues", arguments: { owner: "acme", repo: "app" } });
+
+    // The admin surface lists the server-rendered pending item.
+    let pending: { id: string; principal: string; tool: string }[] = [];
+    for (let i = 0; i < 40 && pending.length === 0; i++) {
+      const r = await fetch(adminBase, { headers: { authorization: `Bearer ${ADMIN}` } });
+      pending = ((await r.json()) as { pending: typeof pending }).pending;
+      if (pending.length === 0) await sleep(50);
+    }
+    expect(pending.length).toBe(1);
+    expect(pending[0].principal).toBe("alice@acme.com");
+    expect(pending[0].tool).toBe("github__list_issues");
+
+    // A wrong admin token is refused.
+    const bad = await fetch(adminBase, { headers: { authorization: "Bearer WRONG" } });
+    expect(bad.status).toBe(401);
+
+    // Approve it out-of-band → the suspended call proceeds and runs the tool.
+    const pr = await fetch(`${adminBase}/${pending[0].id}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${ADMIN}`, "content-type": "application/json" },
+      body: JSON.stringify({ approved: true, by: "boss@acme.com" }),
+    });
+    expect(pr.status).toBe(200);
+
+    const res = await callP;
+    expect(res.isError).toBeFalsy();
+    expect(JSON.stringify(res.content)).toContain("a bug");
+    const call = audit.find((e) => e.type === "tool_call") as { decision?: string } | undefined;
+    expect(call?.decision).toBe("ask-approved");
+  } finally {
+    await mcp.close();
+  }
+});
+
+test("e2e over real HTTP: admin DENY of an `ask` blocks the call; no admin token → the surface is absent (404)", async () => {
+  const ADMIN = "admin-secret-token";
+  const { gateway, url } = await boot(
+    { default: "allow", rules: [{ match: "github__*", action: "ask" }] },
+    { adminToken: ADMIN },
+  );
+  const adminBase = url.replace("/mcp", "/admin/approvals");
+  const mcp = await connectClient(url, gateway.privateKey, gateway.publicKey);
+  try {
+    const callP = mcp.callTool({ name: "github__list_issues", arguments: { owner: "a", repo: "b" } });
+    let pending: { id: string }[] = [];
+    for (let i = 0; i < 40 && pending.length === 0; i++) {
+      const r = await fetch(adminBase, { headers: { authorization: `Bearer ${ADMIN}` } });
+      pending = ((await r.json()) as { pending: typeof pending }).pending;
+      if (pending.length === 0) await sleep(50);
+    }
+    expect(pending.length).toBe(1);
+    await fetch(`${adminBase}/${pending[0].id}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${ADMIN}`, "content-type": "application/json" },
+      body: JSON.stringify({ approved: false }),
+    });
+    const res = await callP;
+    expect(res.isError).toBe(true);
+  } finally {
+    await mcp.close();
+  }
+});
+
+test("e2e over real HTTP: a gateway with no admin token exposes no admin surface (404)", async () => {
+  const { url } = await boot({ default: "allow", rules: [] });
+  const r = await fetch(url.replace("/mcp", "/admin/approvals"), { headers: { authorization: "Bearer x" } });
+  expect(r.status).toBe(404);
+});
+
 test("e2e over real HTTP: DPoP-authenticated client runs a governed call end-to-end", async () => {
   const { gateway, url, audit } = await boot();
   const mcp = await connectClient(url, gateway.privateKey);

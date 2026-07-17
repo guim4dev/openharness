@@ -195,6 +195,20 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8900/token -H 
 #  -> 401  (a subject token that fails IdP validation gets NO gateway token)
 ```
 
+**Answering an `ask` (server-side approval).** If your policy `ask`s a tool, the
+call suspends server-side until a human decides. Start the gateway with an admin
+token in the environment and the approval surface mounts:
+
+```bash
+OPENHARNESS_GATEWAY_ADMIN_TOKEN=admin-secret npm run gateway -- serve "$OH/gw/config.json"
+# then, out of band:
+curl -s http://127.0.0.1:8900/admin/approvals -H 'authorization: Bearer admin-secret'
+#  -> {"pending":[{"id":"...","principal":"...","tool":"...","argsSummary":"..."}]}
+curl -s -X POST http://127.0.0.1:8900/admin/approvals/<id> -H 'authorization: Bearer admin-secret' \
+     -H 'content-type: application/json' -d '{"approved":true,"by":"you@org"}'
+#  -> {"ok":true}   (the suspended call proceeds; a wrong/absent admin token → 401/404)
+```
+
 A real client keeps the DPoP *private* key (this demo only sends the public one),
 uses the returned `access_token` to sign per-request proofs, and declares the
 gateway in its harness definition (`gateway: { url, pubkey, tools }`) — see the
