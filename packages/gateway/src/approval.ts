@@ -79,9 +79,17 @@ export function createApprovalQueue(
     resolve(id, approved, by) {
       const e = entries.get(id);
       if (!e) return;
-      // Second-person rule (Q1): an approval must come from someone else.
-      if (approved && opts.requireSecondPerson && by !== undefined && by === e.requester) {
-        return; // self-approval not allowed here -> ignore (stays pending until timeout/other)
+      // Second-person rule (Q1) — FAIL CLOSED: an APPROVAL under requireSecondPerson
+      // must carry a `by` that DIFFERS from the requester. A missing `by` (or one
+      // equal to the requester) is not a valid approval, so it is ignored and the
+      // request stays pending until a valid approver acts or it times out to deny.
+      // A DENY always goes through (denying is always safe).
+      //
+      // NOTE: `by` is asserted by the admin caller. With a single shared admin
+      // token the surface cannot distinguish approvers, so this is advisory —
+      // true dual-control needs a distinct per-approver credential (a follow-up).
+      if (approved && opts.requireSecondPerson && (by === undefined || by === e.requester)) {
+        return;
       }
       finish(id, approved);
     },

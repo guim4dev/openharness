@@ -96,29 +96,53 @@ function bearerMatches(header: string | undefined, expected: string): boolean {
   return timingSafeEqual(a, b);
 }
 
-/** Read a JSON request body up to a small cap (admin actions are tiny). */
-async function readJsonBody(req: IncomingMessage, capBytes = 64 * 1024): Promise<unknown> {
+/**
+ * Read a JSON request body up to a small cap (admin actions are tiny). On
+ * overflow the socket is DESTROYED (not just left draining) and a timeout bounds
+ * a slow-loris body, so an admin-token holder can't hang the handler with an
+ * oversized or never-ending stream. Settles exactly once.
+ */
+async function readJsonBody(req: IncomingMessage, capBytes = 64 * 1024, timeoutMs = 10_000): Promise<unknown> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let size = 0;
-    let over = false;
+    let settled = false;
+    const settle = (v: unknown): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(v);
+    };
+    const timer = setTimeout(() => {
+      try {
+        req.destroy();
+      } catch {
+        /* already gone */
+      }
+      settle(undefined);
+    }, timeoutMs);
+    if (typeof timer.unref === "function") timer.unref();
     req.on("data", (c: Buffer) => {
       size += c.length;
       if (size > capBytes) {
-        over = true;
-        return;
+        try {
+          req.destroy();
+        } catch {
+          /* already gone */
+        }
+        settle(undefined);
+      } else {
+        chunks.push(c);
       }
-      chunks.push(c);
     });
     req.on("end", () => {
-      if (over) return resolve(undefined);
       try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+        settle(JSON.parse(Buffer.concat(chunks).toString("utf8")));
       } catch {
-        resolve(undefined);
+        settle(undefined);
       }
     });
-    req.on("error", () => resolve(undefined));
+    req.on("error", () => settle(undefined));
   });
 }
 

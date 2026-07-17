@@ -64,3 +64,20 @@ test("requireSecondPerson: the requester cannot self-approve; another principal 
   q.resolve(id, true, "lead@acme.test"); // a second person — approves
   expect(await p).toBe(true);
 });
+
+test("requireSecondPerson: an APPROVAL with NO `by` is ignored (fail-closed), not self-approved", async () => {
+  const q = createApprovalQueue({ requireSecondPerson: true, timeoutMs: 60 });
+  const p = q.request(req);
+  const id = q.pending()[0].id;
+  q.resolve(id, true); // no `by` — must NOT approve
+  expect(q.pending()).toHaveLength(1); // still pending
+  expect(await p).toBe(false); // times out to deny (never approved)
+});
+
+test("requireSecondPerson: a DENY always goes through, with or without `by`", async () => {
+  const q = createApprovalQueue({ requireSecondPerson: true });
+  const p = q.request(req);
+  q.resolve(q.pending()[0].id, false); // deny needs no second person
+  expect(await p).toBe(false);
+  expect(q.pending()).toHaveLength(0);
+});

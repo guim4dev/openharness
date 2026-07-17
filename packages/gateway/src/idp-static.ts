@@ -83,8 +83,16 @@ export function createStaticKeyIdpVerifier(opts: StaticKeyIdpOptions): IdpVerifi
       if (!audOk) return { deny: `unexpected audience '${String(aud)}'` };
 
       const nowSec = now() / 1000;
-      if (typeof payload.exp === "number" && nowSec > payload.exp + tol) return { deny: "subject token is expired" };
-      if (typeof payload.nbf === "number" && nowSec + tol < payload.nbf) return { deny: "subject token is not yet valid" };
+      // `exp` is REQUIRED and must be numeric — a token without a numeric expiry
+      // is rejected (never treated as "no expiry"), so a leaked/cached subject
+      // token can't become a permanent gateway-minting credential (the §3
+      // short-lived-identity intent). Fail closed on a non-numeric temporal claim.
+      if (typeof payload.exp !== "number") return { deny: "subject token has no numeric exp" };
+      if (nowSec > payload.exp + tol) return { deny: "subject token is expired" };
+      if (payload.nbf !== undefined) {
+        if (typeof payload.nbf !== "number") return { deny: "subject token has a non-numeric nbf" };
+        if (nowSec + tol < payload.nbf) return { deny: "subject token is not yet valid" };
+      }
 
       if (typeof payload.sub !== "string" || payload.sub.length === 0) return { deny: "subject token has no sub" };
       const rawGroups = payload[groupsClaim];

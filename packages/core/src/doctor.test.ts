@@ -419,10 +419,21 @@ test("mcp-egress-ungoverned is a WARNING by default and an ERROR under --strict-
   expect(codes(strict.problems)).toContain("mcp-egress-ungoverned");
   expect(strict.ok).toBe(false); // build-failing under strict
 
-  // A policy that DOES govern mcp__* clears it even under strict.
+  // A BROAD rule that catches arbitrary tools clears it even under strict.
   const governed = writeDef(
     baseManifest({ mcp: { servers: { fs: { transport: "stdio", command: "npx", args: ["-y", "srv@1.2.3"] } } } }),
-    { default: "allow", rules: [{ match: "mcp__*__delete_*", action: "deny" }] },
+    { default: "allow", rules: [{ match: "mcp__*", action: "ask" }] },
   );
   expect(codes((await runDoctor(governed, { strictSupplyChain: true })).problems)).not.toContain("mcp-egress-ungoverned");
+});
+
+test("a NARROW-only mcp rule (delete_*) does NOT count as governing egress — the rest still falls to default-allow", async () => {
+  // The concrete false-negative: a single narrow rule that looks like it governs
+  // mcp but leaves every non-delete tool on default-allow.
+  const narrow = writeDef(
+    baseManifest({ mcp: { servers: { linear: { transport: "stdio", command: "npx", args: ["-y", "srv@1.2.3"] } } } }),
+    { default: "allow", rules: [{ match: "mcp__*__delete_*", action: "deny" }] },
+  );
+  expect(codes((await runDoctor(narrow)).problems)).toContain("mcp-egress-ungoverned");
+  expect((await runDoctor(narrow, { strictSupplyChain: true })).ok).toBe(false);
 });

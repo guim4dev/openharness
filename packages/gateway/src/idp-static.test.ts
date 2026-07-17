@@ -66,6 +66,24 @@ test("an expired token is denied", async () => {
   expect(denied(await verifier(idp.publicKey).verifySubjectToken(expired))).toBe(true);
 });
 
+test("a token with NO exp is denied — exp is required, never treated as no-expiry", async () => {
+  const idp = idpKeypair();
+  const noExp = { sub: base.sub, iss: base.iss, aud: base.aud, groups: base.groups }; // no exp
+  expect(denied(await verifier(idp.publicKey).verifySubjectToken(mintJwt(idp.privateKey, noExp)))).toBe(true);
+});
+
+test("a non-numeric exp (string) is denied, not skipped", async () => {
+  const idp = idpKeypair();
+  const strExp = mintJwt(idp.privateKey, { ...base, exp: "1" as unknown as number });
+  expect(denied(await verifier(idp.publicKey).verifySubjectToken(strExp))).toBe(true);
+});
+
+test("a non-numeric nbf (string) is denied, not skipped", async () => {
+  const idp = idpKeypair();
+  const strNbf = mintJwt(idp.privateKey, { ...base, nbf: String(NOW / 1000 + 10000) as unknown as number });
+  expect(denied(await verifier(idp.publicKey).verifySubjectToken(strNbf))).toBe(true);
+});
+
 test("a tampered payload (extra group) breaks the signature and is denied", async () => {
   const idp = idpKeypair();
   const tok = mintJwt(idp.privateKey, base);

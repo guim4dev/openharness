@@ -316,19 +316,26 @@ export async function runDoctor(defDir: string, opts: RunDoctorOptions = {}): Pr
     //    egress surface open — nudge explicit `mcp__*` rules. Narrow trigger
     //    (default-allow + zero mcp rules) keeps this from firing on a policy that
     //    already governs MCP or that is deny-by-default.
-    const hasMcpServers = Object.keys(manifest.mcp?.servers ?? {}).length > 0;
-    const governsMcp = policy.rules.some((r) => {
-      const m = r.match.replace(/\(.*\)$/s, "").trim();
-      return m.startsWith("mcp__") || globMatch(m, "mcp__example__tool");
+    // A server is GOVERNED only if some rule would catch an ARBITRARY (unknown)
+    // tool from it — i.e. a broad `mcp__<server>__*` or `mcp__*`. A narrow rule
+    // like `mcp__*__delete_*`, or a literal that matches no real tool, does NOT
+    // count: every other tool of that server still falls to default-allow. We
+    // probe each declared server with a synthetic tool name no explicit rule
+    // would target; a server with no rule matching the probe is ungoverned.
+    const EGRESS_PROBE = "zzq_openharness_egress_probe";
+    const servers = Object.keys(manifest.mcp?.servers ?? {});
+    const ungovernedServers = servers.filter((s) => {
+      const probe = `mcp__${s}__${EGRESS_PROBE}`;
+      return !policy.rules.some((r) => globMatch(r.match.replace(/\(.*\)$/s, "").trim(), probe));
     });
-    if (hasMcpServers && policy.default === "allow" && !governsMcp)
+    if (policy.default === "allow" && ungovernedServers.length > 0)
       problems.push({
         // Escalated to an error under strict supply chain (same lever as the
         // unpinned-server check): a CI gate then refuses ungoverned MCP egress.
         level: opts.strictSupplyChain ? "error" : "warn",
         code: "mcp-egress-ungoverned",
         message:
-          "MCP servers are declared but the policy leaves mcp__* on default-allow (no rule governs MCP egress) — those tools reach external systems ungoverned; add explicit mcp__* rules",
+          `MCP server(s) ${ungovernedServers.join(", ")} reach external systems on default-allow — no rule governs their arbitrary tools (a narrow rule like mcp__*__delete_* does not count); add a broad mcp__<server>__* (or mcp__*) rule`,
       });
   }
 
