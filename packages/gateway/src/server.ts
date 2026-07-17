@@ -12,6 +12,14 @@ import type { ApprovalQueue } from "./approval.ts";
 import { sanitizeResult } from "./redact-return.ts";
 import { auditGovernedCall } from "./audit-endpoint.ts";
 
+/** Classify a connector's thrown error for pool rotation/backoff. */
+function classifyUpstreamError(message: string): "rate_limit" | "auth" | "other" {
+  const m = message.toLowerCase();
+  if (/\b429\b|rate.?limit|too many requests/.test(m)) return "rate_limit";
+  if (/\b401\b|\b403\b|unauthor|forbidden|invalid.?(token|credential|api.?key|secret)/.test(m)) return "auth";
+  return "other";
+}
+
 /**
  * The governed execution pipeline. When present, every `tools/call` flows
  * auth -> PDP (authoritative) -> allow/ask/deny -> credential broker (post-
@@ -114,8 +122,18 @@ export function createGateway(opts: GatewayOptions): Gateway {
     try {
       const connector = p.sessions.for(principal.sub, connectorId);
       result = await connector.call(name, args, cred); // ORIGINAL args reach the upstream
+      // A pooled broker rotates on reported failures — a clean call keeps the
+      // used credential healthy. (No-op for a single-credential broker.)
+      p.broker.report?.(upstreamId, cred.credentialId, { ok: true });
     } catch (e) {
-      return err((e as Error)?.message ?? "upstream error");
+      const message = (e as Error)?.message ?? "upstream error";
+      // A THROW from a connector is an unambiguous call failure — classify it so
+      // the pool backs off (rate limit) or invalidates (auth) the credential and
+      // the next call rotates to a healthy one. Connectors should THROW on an
+      // upstream auth/rate-limit rejection (not swallow it into an isError) to
+      // trigger rotation.
+      p.broker.report?.(upstreamId, cred.credentialId, { ok: false, kind: classifyUpstreamError(message) });
+      return err(message);
     }
 
     const sanitized = sanitizeResult(p.policy, {

@@ -16,7 +16,9 @@ export {
 export type { GatewayClaims, Principal, Deny, IncomingRequest, ReplayGuard } from "./auth.ts";
 export { decide } from "./pdp.ts";
 export { SecretStoreKms } from "./broker.ts";
-export type { KmsStore, UpstreamCredential } from "./broker.ts";
+export type { KmsStore, UpstreamCredential, CredentialResult } from "./broker.ts";
+export { CredentialPool, PooledKmsStore } from "./broker-pool.ts";
+export type { PooledKmsStoreOptions } from "./broker-pool.ts";
 export { KmsBrokerStore, LocalKms, InMemorySecretsManager } from "./broker-kms.ts";
 export type { KmsClient, SecretsManager, WrappedSecret } from "./broker-kms.ts";
 export { egressAllowed, isPrivateHost, tapInjectedField } from "./egress.ts";

@@ -10,6 +10,21 @@ export interface UpstreamCredential {
   secret: string;
   /** Non-secret metadata a connector may need (e.g. a base URL, a username). */
   meta?: Record<string, string>;
+  /**
+   * Which pooled credential this is, when the broker draws from a pool. The
+   * pipeline echoes it back to `report()` so the pool can rotate/back off the
+   * RIGHT credential on a failure. Absent for a single-credential broker.
+   */
+  credentialId?: string;
+}
+
+/** The outcome of a governed call, reported back so a pooled broker can rotate. */
+export interface CredentialResult {
+  ok: boolean;
+  /** Failure classification: `rate_limit` backs off temporarily; `auth` invalidates; `other` is left healthy (transient). */
+  kind?: "rate_limit" | "auth" | "other";
+  /** For `rate_limit`: when the credential may be retried (ms epoch). */
+  retryAfterMs?: number;
 }
 
 /**
@@ -20,6 +35,13 @@ export interface UpstreamCredential {
  */
 export interface KmsStore {
   resolve(upstreamId: string): Promise<UpstreamCredential | undefined>;
+  /**
+   * Report a call's outcome so a POOLED broker can mark the used credential and
+   * rotate to the next healthy one on the next resolve. A no-op for a
+   * single-credential broker (the method is optional). `credentialId` is the one
+   * `resolve` returned; omit-safe.
+   */
+  report?(upstreamId: string, credentialId: string | undefined, result: CredentialResult): void;
 }
 
 /**
