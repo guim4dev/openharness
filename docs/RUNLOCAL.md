@@ -58,7 +58,8 @@ npm run chat -- doctor "$OH/my-harness"
 ```
 
 A definition dir is just files — `harness.json`, `system-prompt.md`,
-`policy.json`, `skills/`. Edit them and re-run `doctor`. See
+`policy.json`, `skills/`, and a starter `README.md`. Edit them and re-run
+`doctor`. See
 [`AUTHORING.md`](AUTHORING.md) for every field. Then chat against it exactly like
 step 1: `npm run chat -- "$OH/my-harness" "..."`.
 
@@ -129,6 +130,17 @@ npm run chat -- audit push "$OH/session.jsonl" --server http://127.0.0.1:8899 --
 # Idempotent + resumable — a second push ships nothing new:
 npm run chat -- audit push "$OH/session.jsonl" --server http://127.0.0.1:8899 --source sess-demo
 #  -> shipped 0 record(s) ... (ackedSeq=2)
+```
+
+**Cross-check local against the anchor.** `audit reconcile` compares your local
+chain to the gateway's ingested copy (`ingested-<source>.jsonl`) and reports any
+divergence as tamper evidence:
+
+```bash
+npm run chat -- audit reconcile "$OH/session.jsonl" "$OH/srv-audit/ingested-sess-demo.jsonl"
+#  -> audit chains reconcile: 3 governed call(s) match, no divergence
+#  (on divergence → "audit DIVERGENCE (tamper evidence): ..." with per-call
+#   "only in gateway / only in local" lines, exit 1)
 ```
 
 Now forge the local log and ship it to a **fresh** source — the server refuses:
