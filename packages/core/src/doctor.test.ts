@@ -400,3 +400,29 @@ test("a malformed provenance bundle is a clean provenance failure, never a runDo
   expect(report.ok).toBe(false);
   expect(codes(report.problems)).toContain("artifact-provenance-failed");
 });
+
+test("mcp-egress-ungoverned is a WARNING by default and an ERROR under --strict-supply-chain", async () => {
+  // default-allow + a declared MCP server + NO mcp__* rule = ungoverned egress.
+  const mk = () =>
+    writeDef(
+      baseManifest({
+        mcp: { servers: { fs: { transport: "stdio", command: "npx", args: ["-y", "srv@1.2.3"] } } },
+      }),
+      { default: "allow", rules: [{ match: "read", action: "allow" }] },
+    );
+
+  const lenient = await runDoctor(mk());
+  expect(codes(lenient.problems)).toContain("mcp-egress-ungoverned");
+  expect(lenient.ok).toBe(true); // warning only
+
+  const strict = await runDoctor(mk(), { strictSupplyChain: true });
+  expect(codes(strict.problems)).toContain("mcp-egress-ungoverned");
+  expect(strict.ok).toBe(false); // build-failing under strict
+
+  // A policy that DOES govern mcp__* clears it even under strict.
+  const governed = writeDef(
+    baseManifest({ mcp: { servers: { fs: { transport: "stdio", command: "npx", args: ["-y", "srv@1.2.3"] } } } }),
+    { default: "allow", rules: [{ match: "mcp__*__delete_*", action: "deny" }] },
+  );
+  expect(codes((await runDoctor(governed, { strictSupplyChain: true })).problems)).not.toContain("mcp-egress-ungoverned");
+});

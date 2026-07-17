@@ -323,7 +323,9 @@ export async function runDoctor(defDir: string, opts: RunDoctorOptions = {}): Pr
     });
     if (hasMcpServers && policy.default === "allow" && !governsMcp)
       problems.push({
-        level: "warn",
+        // Escalated to an error under strict supply chain (same lever as the
+        // unpinned-server check): a CI gate then refuses ungoverned MCP egress.
+        level: opts.strictSupplyChain ? "error" : "warn",
         code: "mcp-egress-ungoverned",
         message:
           "MCP servers are declared but the policy leaves mcp__* on default-allow (no rule governs MCP egress) — those tools reach external systems ungoverned; add explicit mcp__* rules",

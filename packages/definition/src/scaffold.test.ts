@@ -41,6 +41,12 @@ test("scaffolds a harness that loadHarnessDefinition accepts, whose policy.json 
   expect(def.policy?.rules.length).toBeGreaterThan(0);
   expect(def.policy?.redact?.length).toBeGreaterThan(0);
 
+  // The starter governs MCP egress up front (secure-by-default): destructive
+  // ops denied, other mutations ask — inert until an mcp block is added.
+  const mcpRules = def.policy!.rules.filter((r) => r.match.startsWith("mcp__"));
+  expect(mcpRules.some((r) => r.action === "deny")).toBe(true);
+  expect(mcpRules.some((r) => r.action === "ask")).toBe(true);
+
   // no mcp section by default — stays trivially runnable/offline
   expect(def.manifest.mcp).toBeUndefined();
 });

@@ -184,10 +184,30 @@ export async function scaffoldHarness(
     default: "allow",
     rules: [
       { match: "read", action: "allow", reason: "Reading files is always safe." },
+      // MCP egress governance (secure-by-default): MCP tools reach external
+      // systems, so mutations are governed up front — destructive ops are denied
+      // and other writes require a human. These are inert until you add a `mcp`
+      // block to harness.json, then they govern every bridged mcp__<server>__*
+      // tool. Scope them to real server/tool names as you wire servers in.
       {
         match: "mcp__*__delete_*",
         action: "deny",
         reason: "Destructive MCP operations are blocked by the starter policy.",
+      },
+      {
+        match: "mcp__*__create_*",
+        action: "ask",
+        reason: "Creating via an MCP tool reaches an external system — approve until scoped.",
+      },
+      {
+        match: "mcp__*__update_*",
+        action: "ask",
+        reason: "Updating via an MCP tool reaches an external system — approve until scoped.",
+      },
+      {
+        match: "mcp__*__send_*",
+        action: "ask",
+        reason: "Sending via an MCP tool reaches an external system — approve until scoped.",
       },
       {
         match: "bash(rm -rf *)",
