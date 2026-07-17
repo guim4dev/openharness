@@ -720,6 +720,25 @@ body {
   padding: 7px 9px;
 }
 
+.builder-mcp textarea {
+  font-family: var(--mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 9px;
+  min-height: 96px;
+  resize: vertical;
+}
+
+.builder-mcp textarea:focus,
+.builder-mcp input:focus {
+  outline: none;
+  border-color: var(--accent, #6ba6ee);
+}
+
 .builder-output {
   display: flex;
   flex-direction: column;
