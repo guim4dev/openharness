@@ -1,8 +1,16 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { harnessManifestSchema } from "./schema.ts";
 
 export class MaterializeError extends Error {}
+
+/** Inline SKILL.md content for a skill the manifest declares. */
+export interface MaterializeSkill {
+  /** The skill DIRECTORY, relative to the definition root (e.g. `skills/triage`). */
+  path: string;
+  /** Full SKILL.md content (frontmatter + body) written to `<path>/SKILL.md`. */
+  content: string;
+}
 
 export interface MaterializeDefinitionInput {
   /** The `harness.json` object (validated against the schema before any write). */
@@ -11,6 +19,12 @@ export interface MaterializeDefinitionInput {
   policy?: unknown;
   /** Text written to `system-prompt.md` (the manifest must reference it). */
   systemPrompt: string;
+  /**
+   * Inline skill content to write as `<path>/SKILL.md`. A builder that declares a
+   * (mandatory) skill in the manifest MUST supply its content here — otherwise the
+   * materialized dir has a skill dir with no SKILL.md and fails `doctor`/load.
+   */
+  skills?: MaterializeSkill[];
 }
 
 export interface MaterializeDefinitionResult {
@@ -57,6 +71,25 @@ export async function writeHarnessDefinition(
   if (input.policy !== undefined) {
     await writeFile(join(root, "policy.json"), `${JSON.stringify(input.policy, null, 2)}\n`);
     files.push("policy.json");
+  }
+
+  // Skills: write each SKILL.md, fail-closed on a path that escapes the root
+  // (same containment rule the loader enforces on read). Validate ALL paths
+  // before writing any, so a bad skill never leaves a half-written dir.
+  for (const s of input.skills ?? []) {
+    const skillMd = resolve(root, s.path, "SKILL.md");
+    if (skillMd !== root && !skillMd.startsWith(root + sep)) {
+      throw new MaterializeError(
+        `skill path '${s.path}' resolves OUTSIDE the definition dir — refusing to write it`,
+      );
+    }
+  }
+  for (const s of input.skills ?? []) {
+    const skillMd = resolve(root, s.path, "SKILL.md");
+    await mkdir(dirname(skillMd), { recursive: true });
+    const content = s.content.endsWith("\n") ? s.content : `${s.content}\n`;
+    await writeFile(skillMd, content);
+    files.push(join(s.path, "SKILL.md"));
   }
 
   return { rootDir: root, files };

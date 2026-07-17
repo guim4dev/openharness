@@ -56,3 +56,36 @@ test("rejects a manifest whose systemPrompt is not system-prompt.md", async () =
   const bad = { ...manifest, systemPrompt: "prompt.txt" };
   await expect(writeHarnessDefinition(out, { manifest: bad, systemPrompt: "x" })).rejects.toThrow(/system-prompt\.md/);
 });
+
+test("writes a mandatory skill's SKILL.md so the materialized dir passes load (coherence gap fix)", async () => {
+  const out = join(dir, "with-skill");
+  const withSkill = {
+    ...manifest,
+    skills: [{ path: "skills/triage", mandatory: true }],
+  };
+  const skillMd = "---\nname: triage\ndescription: Triage incoming issues.\n---\nDo the triage.";
+  const result = await writeHarnessDefinition(out, {
+    manifest: withSkill,
+    systemPrompt: "You are governed.",
+    skills: [{ path: "skills/triage", content: skillMd }],
+  });
+  expect(result.files).toContain(join("skills/triage", "SKILL.md"));
+
+  // The loader enforces that a MANDATORY skill has a SKILL.md — so this only
+  // loads because materialize actually wrote it.
+  const def = await loadHarnessDefinition(out);
+  expect(def.skillDirs.length).toBe(1);
+  expect(def.skillDirs[0].path).toContain("triage");
+  expect(readFileSync(join(out, "skills/triage", "SKILL.md"), "utf8")).toContain("Do the triage.");
+});
+
+test("refuses a skill path that escapes the definition dir (traversal), writing nothing", async () => {
+  const out = join(dir, "traversal");
+  await expect(
+    writeHarnessDefinition(out, {
+      manifest,
+      systemPrompt: "hi",
+      skills: [{ path: "../../evil", content: "---\nname: evil\ndescription: x\n---\npwned" }],
+    }),
+  ).rejects.toThrow(MaterializeError);
+});
