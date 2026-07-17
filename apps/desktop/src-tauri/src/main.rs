@@ -10,6 +10,27 @@ use std::thread;
 use serde::Deserialize;
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 
+/// Pass a trust-critical env var to the sidecar. In a RELEASE build the sealed
+/// value IS the root of trust and must win over the launch environment: a local
+/// attacker who can preset the app's environment (`launchctl setenv`, a
+/// LaunchAgent plist, a poisoned parent shell) could otherwise set
+/// `OH_BUNDLE_PATH=""` / `OH_ORG_PUBKEY_PATH=<theirs>` to downgrade the sidecar to
+/// an unverified boot or a forged org key — bypassing the whole supply-chain
+/// gate. So release OVERWRITES unconditionally. A DEBUG build keeps the env
+/// override so `npm run dev:desktop` can point the sidecar at a local harness.
+fn seal_env(cmd: &mut Command, key: &str, value: impl AsRef<std::ffi::OsStr>) {
+    #[cfg(not(debug_assertions))]
+    {
+        cmd.env(key, value);
+    }
+    #[cfg(debug_assertions)]
+    {
+        if std::env::var_os(key).is_none() {
+            cmd.env(key, value);
+        }
+    }
+}
+
 /// The loopback coordinates the Node sidecar prints as its first JSON line on
 /// stdout. The webview opens `ws://127.0.0.1:<port>?token=<token>`.
 #[derive(Deserialize)]
@@ -134,12 +155,8 @@ fn spawn_sidecar(app_id: &str, paths: &SidecarPaths) -> std::io::Result<Child> {
     // under the shipped org pubkey. A tampered/wrong-key bundle brings the
     // sidecar up in refusal mode rather than trusting unapproved config.
     if let Some((bundle, pubkey)) = &paths.verified {
-        if std::env::var_os("OH_BUNDLE_PATH").is_none() {
-            cmd.env("OH_BUNDLE_PATH", bundle);
-        }
-        if std::env::var_os("OH_ORG_PUBKEY_PATH").is_none() {
-            cmd.env("OH_ORG_PUBKEY_PATH", pubkey);
-        }
+        seal_env(&mut cmd, "OH_BUNDLE_PATH", bundle);
+        seal_env(&mut cmd, "OH_ORG_PUBKEY_PATH", pubkey);
     }
 
     // Anti-rollback floor: read the baked min-version.txt and pass its trimmed
@@ -147,15 +164,19 @@ fn spawn_sidecar(app_id: &str, paths: &SidecarPaths) -> std::io::Result<Child> {
     // org-signed) bundle. A missing/unreadable file leaves the floor unset (the
     // signature + hash gates still apply), matching the "optional" contract.
     if let Some(path) = &paths.min_version {
-        if std::env::var_os("OH_MIN_VERSION").is_none() {
-            if let Ok(contents) = std::fs::read_to_string(path) {
-                let trimmed = contents.trim();
-                if !trimmed.is_empty() {
-                    cmd.env("OH_MIN_VERSION", trimmed);
-                }
+        if let Ok(contents) = std::fs::read_to_string(path) {
+            let trimmed = contents.trim();
+            if !trimmed.is_empty() {
+                seal_env(&mut cmd, "OH_MIN_VERSION", trimmed);
             }
         }
     }
+
+    // Mark the sidecar environment as SEALED in RELEASE so server.ts fails closed
+    // on any unverified boot (defense in depth with the env-sealing above). Never
+    // set in debug, where an unverified dev boot (OH_HARNESS_PATH) is intended.
+    #[cfg(not(debug_assertions))]
+    cmd.env("OH_SEALED", "1");
 
     // Namespace the sidecar's config dir (credentials, audit log, state) to
     // THIS app's identity so distinct brands/builds on the same machine never

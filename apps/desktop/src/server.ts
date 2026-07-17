@@ -89,6 +89,18 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
+  // Defense in depth (belt to main.rs's env-sealing suspenders): a SEALED build
+  // — the launcher sets OH_SEALED=1 in release and pins the verified inputs — must
+  // NEVER take an unverified/dev boot, whatever the environment says. If we reach
+  // here sealed without a verified bundle (e.g. a preset OH_BUNDLE_PATH="" trying
+  // to downgrade to an OH_HARNESS_PATH boot), refuse rather than load unsigned config.
+  if (process.env.OH_SEALED === "1" && !verified) {
+    console.error(
+      "Sealed build: refusing an unverified boot — a verified bundle (OH_BUNDLE_PATH + OH_ORG_PUBKEY_PATH) is required.",
+    );
+    process.exit(2);
+  }
+
   if (!verified && !harnessPath) {
     console.error(
       "No boot source configured. Set OH_BUNDLE_PATH + OH_ORG_PUBKEY_PATH for a verified boot, " +

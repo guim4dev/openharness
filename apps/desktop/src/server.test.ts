@@ -306,3 +306,16 @@ test(
   },
   210_000,
 );
+
+test(
+  "SEALED build refuses an unverified boot: OH_SEALED=1 + OH_HARNESS_PATH (no bundle) exits, never handshakes",
+  async () => {
+    // The desktop-boot review's HIGH: a preset empty OH_BUNDLE_PATH could downgrade
+    // release to an unverified OH_HARNESS_PATH boot. In a sealed build server.ts must
+    // fail closed — so it exits (code 2) rather than printing a handshake.
+    await expect(bootServerTs({ OH_SEALED: "1", OH_HARNESS_PATH: exampleHarness })).rejects.toThrow(
+      /exited before printing a handshake \(code 2\)/,
+    );
+  },
+  120_000,
+);
