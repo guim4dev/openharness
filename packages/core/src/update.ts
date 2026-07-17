@@ -23,17 +23,46 @@ function readBundleFile(path: string): Bundle {
   return JSON.parse(readFileSync(path, "utf8")) as Bundle;
 }
 
-/** The persisted floor, or `fallback` when no floor file exists yet. */
-export function readFloor(floorPath: string, fallback = "0.0.0"): string {
-  if (!existsSync(floorPath)) return fallback;
-  const v = readFileSync(floorPath, "utf8").trim();
-  return v.length > 0 ? v : fallback;
+let tmpSeq = 0;
+/** A monotonic per-process suffix so concurrent temp writes never collide. */
+function nextTmpSeq(): number {
+  return tmpSeq++;
 }
 
-/** Advance the floor to `version` (only ever forward — a lower value is ignored). */
+/** A concrete semver-ish version: digits.digits[.digits][-prerelease][+build]. */
+const VERSION_RE = /^\d+(\.\d+)*(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
+
+/**
+ * The persisted floor, or `fallback` when it is absent OR unparseable. Fails
+ * CLOSED to the caller's trustworthy lower bound: a garbage/torn/hostile floor
+ * file must NEVER read as `0.0.0` (the lowest possible floor), which would let a
+ * rollback through — the exact write access the floor is meant to defend against
+ * could otherwise disable it by corrupting the file.
+ */
+export function readFloor(floorPath: string, fallback = "0.0.0"): string {
+  if (!existsSync(floorPath)) return fallback;
+  let v: string;
+  try {
+    v = readFileSync(floorPath, "utf8").trim();
+  } catch {
+    return fallback;
+  }
+  return VERSION_RE.test(v) ? v : fallback;
+}
+
+/** The larger of two versions (the anti-rollback lower bound never drops). */
+function maxVersion(a: string, b: string): string {
+  return isOlder(a, b) ? b : a;
+}
+
+/** Atomically advance the floor to `version` (only ever forward). */
 function bumpFloor(floorPath: string, version: string): void {
   const current = readFloor(floorPath, "0.0.0");
-  if (isOlder(current, version)) writeFileSync(floorPath, `${version}\n`);
+  if (isOlder(current, version)) {
+    const tmp = `${floorPath}.tmp`;
+    writeFileSync(tmp, `${version}\n`);
+    renameSync(tmp, floorPath); // atomic: a torn write never leaves a garbage floor
+  }
 }
 
 export interface RefreshOptions {
@@ -64,7 +93,12 @@ export interface RefreshResult {
 }
 
 export async function refreshPinnedDefinition(opts: RefreshOptions): Promise<RefreshResult> {
-  const floor = readFloor(opts.floorPath, opts.currentVersion ?? "0.0.0");
+  // Effective floor = max(persisted floor, currentVersion). currentVersion is the
+  // running app's baked version — a trustworthy lower bound the floor file can
+  // only RAISE, never lower. So a deleted/corrupt/lowered floor still can't
+  // accept a rollback below what's already installed.
+  const persisted = readFloor(opts.floorPath, opts.currentVersion ?? "0.0.0");
+  const floor = opts.currentVersion ? maxVersion(persisted, opts.currentVersion) : persisted;
   const fetchImpl = opts.fetchImpl ?? fetchBundle;
   const bundle = await fetchImpl(opts.serverUrl, opts.token, opts.name);
 
@@ -86,7 +120,9 @@ export async function refreshPinnedDefinition(opts: RefreshOptions): Promise<Ref
 
   mkdirSync(opts.updatesDir, { recursive: true });
   const dest = join(opts.updatesDir, `${manifest.name}-${manifest.version}.ohbundle`);
-  const tmp = `${dest}.tmp`;
+  // Per-invocation temp name so two concurrent refreshes never write the same
+  // temp file and rename an interleaved (corrupt) blob into place.
+  const tmp = `${dest}.${process.pid}.${nextTmpSeq()}.tmp`;
   writeBundle(bundle, tmp);
   renameSync(tmp, dest); // atomic: a partial download is never a boot candidate
   bumpFloor(opts.floorPath, manifest.version);
@@ -102,13 +138,27 @@ export interface ResolveOptions {
 }
 
 /**
- * Pick the bundle the app should boot: the newest bundle (baked-in or a pulled
- * update) that verifies under the org key with the persisted floor as
- * `minVersion`. A rollback bundle sitting in the updates dir is refused by the
- * floor and skipped; if nothing beats the baked bundle, the baked bundle wins.
+ * Pick the bundle the app should boot: the newest that verifies under the org
+ * key at the effective floor. The effective floor is max(persisted floor, the
+ * baked bundle's version) — the baked bundle is shipped INSIDE the signed app,
+ * so its version is a trustworthy lower bound the local floor file can only
+ * RAISE. That closes the rollback-via-deleted/corrupt-floor hole: even with no
+ * floor file, nothing OLDER than the baked bundle is ever booted. A rollback or
+ * tampered bundle in the updates dir is refused and skipped; ties go to baked.
  */
 export function resolvePinnedBundle(opts: ResolveOptions): { path: string; version: string } {
-  const floor = readFloor(opts.floorPath, "0.0.0");
+  // The baked bundle's own version is the trustworthy lower bound. Verify it
+  // WITHOUT a floor to read its version; if even the baked bundle doesn't verify
+  // under the org key, fall back to the persisted floor alone.
+  let bakedVersion: string | undefined;
+  try {
+    bakedVersion = verifyBundle(readBundleFile(opts.bakedBundlePath), opts.pubkeyPem, {}).manifest.version;
+  } catch {
+    bakedVersion = undefined;
+  }
+  const persisted = readFloor(opts.floorPath, bakedVersion ?? "0.0.0");
+  const floor = bakedVersion ? maxVersion(persisted, bakedVersion) : persisted;
+
   const candidates: string[] = [opts.bakedBundlePath];
   if (existsSync(opts.updatesDir)) {
     for (const f of readdirSync(opts.updatesDir)) {

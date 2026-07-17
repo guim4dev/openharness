@@ -151,3 +151,60 @@ test("e2e: refresh pulls a newer bundle over the REAL loopback server and pins i
   expect(r.updated).toBe(true);
   expect(r.version).toBe("0.2.0");
 });
+
+// ── review fixes: floor fails CLOSED, trustworthy lower bound, pre-release ────
+
+test("readFloor falls back on GARBAGE content (not just empty) — never reads as 0.0.0", () => {
+  const dir = tmp();
+  const fp = join(dir, "floor.txt");
+  for (const junk of ["corrupted\n", "latest", "-5.0.0", "not.a.version"]) {
+    writeFileSync(fp, junk);
+    expect(readFloor(fp, "0.5.0")).toBe("0.5.0"); // fail-closed to the trustworthy fallback
+  }
+});
+
+test("refresh: a CORRUPT floor file cannot lower the bar below currentVersion (rollback still refused)", async () => {
+  const dir = tmp();
+  const floorPath = join(dir, "floor.txt");
+  writeFileSync(floorPath, "corrupted"); // attacker/torn write
+  const r = await refreshPinnedDefinition({
+    serverUrl: "http://unused",
+    pubkeyPem: KEYS.publicKey,
+    updatesDir: join(dir, "updates"),
+    floorPath,
+    currentVersion: "0.5.0",
+    fetchImpl: fetchReturning(signAtVersion(dir, "0.4.0")), // an org-signed ROLLBACK
+  });
+  expect(r.updated).toBe(false);
+  expect(r.rejected).toBe(true); // effective floor = max(corrupt→0.5.0 fallback, 0.5.0) rejects 0.4.0
+});
+
+test("resolve: a MISSING or CORRUPT floor file still refuses a rollback below the baked version", async () => {
+  const dir = tmp();
+  const updatesDir = join(dir, "updates");
+  const floorPath = join(dir, "floor.txt");
+  const baked = join(dir, "baked.ohbundle");
+  mkdirSync(updatesDir, { recursive: true });
+  writeBundle(signAtVersion(dir, "0.5.0"), baked); // shipped inside the signed app
+  writeBundle(signAtVersion(dir, "0.4.0"), join(updatesDir, "example-0.4.0.ohbundle")); // rollback dropped in
+
+  // No floor file at all → baked version is the trustworthy lower bound.
+  const picked = resolvePinnedBundle({ bakedBundlePath: baked, updatesDir, pubkeyPem: KEYS.publicKey, floorPath });
+  expect(picked.version).toBe("0.5.0"); // NOT the 0.4.0 rollback
+
+  // Corrupt floor file → same: baked wins, rollback refused.
+  writeFileSync(floorPath, "corrupted");
+  expect(resolvePinnedBundle({ bakedBundlePath: baked, updatesDir, pubkeyPem: KEYS.publicKey, floorPath }).version).toBe("0.5.0");
+});
+
+test("pre-release rollback is refused: 1.0.0-rc.1 does not satisfy a 1.0.0-rc.2 floor", async () => {
+  const dir = tmp();
+  const updatesDir = join(dir, "updates");
+  const floorPath = join(dir, "floor.txt");
+  const baked = join(dir, "baked.ohbundle");
+  mkdirSync(updatesDir, { recursive: true });
+  writeBundle(signAtVersion(dir, "1.0.0-rc.2"), baked);
+  writeBundle(signAtVersion(dir, "1.0.0-rc.1"), join(updatesDir, "example-rc1.ohbundle")); // earlier pre-release
+  const picked = resolvePinnedBundle({ bakedBundlePath: baked, updatesDir, pubkeyPem: KEYS.publicKey, floorPath });
+  expect(picked.version).toBe("1.0.0-rc.2"); // rc.1 is older -> refused
+});

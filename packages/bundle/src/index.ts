@@ -105,22 +105,60 @@ function walkFiles(root: string): string[] {
   return out.sort();
 }
 
-function parseVersion(v: string): number[] {
-  const core = v.trim().replace(/^v/, "").split("+")[0].split("-")[0];
-  return core.split(".").map((n) => Number.parseInt(n, 10) || 0);
+/** `1.2.3-rc.1` -> `{ nums: [1,2,3], pre: ["rc","1"] }`; build metadata (`+…`) ignored. */
+function parseVersion(v: string): { nums: number[]; pre: string[] } {
+  const withoutBuild = v.trim().replace(/^v/, "").split("+")[0];
+  const dash = withoutBuild.indexOf("-");
+  const core = dash >= 0 ? withoutBuild.slice(0, dash) : withoutBuild;
+  const preRaw = dash >= 0 ? withoutBuild.slice(dash + 1) : "";
+  return {
+    nums: core.split(".").map((n) => Number.parseInt(n, 10) || 0),
+    pre: preRaw.length > 0 ? preRaw.split(".") : [],
+  };
 }
 
-/** true when semver `a` is strictly older than `b` (major.minor.patch, pre-release ignored). */
+/** SemVer §11 pre-release precedence. Returns <0 if a<b, 0 if equal, >0 if a>b. */
+function comparePre(a: string[], b: string[]): number {
+  // A version WITH a pre-release is LOWER than one without (same release).
+  if (a.length === 0 && b.length === 0) return 0;
+  if (a.length === 0) return 1; // a is a release, b is pre-release -> a is higher
+  if (b.length === 0) return -1;
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i];
+    const y = b[i];
+    if (x === undefined) return -1; // fewer identifiers -> lower precedence
+    if (y === undefined) return 1;
+    const xn = /^\d+$/.test(x);
+    const yn = /^\d+$/.test(y);
+    if (xn && yn) {
+      const d = Number(x) - Number(y);
+      if (d !== 0) return d < 0 ? -1 : 1;
+    } else if (xn !== yn) {
+      return xn ? -1 : 1; // numeric identifiers are lower than alphanumeric
+    } else if (x !== y) {
+      return x < y ? -1 : 1; // ASCII compare
+    }
+  }
+  return 0;
+}
+
+/**
+ * True when semver `a` is strictly older than `b`, INCLUDING pre-release
+ * precedence (`1.0.0-rc.1` < `1.0.0-rc.2` < `1.0.0`). Used as an anti-rollback
+ * comparator, so pre-release ordering is honored — a rollback to an earlier
+ * pre-release within the same major.minor.patch must not slip through.
+ */
 export function isOlder(a: string, b: string): boolean {
   const pa = parseVersion(a);
   const pb = parseVersion(b);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const x = pa[i] ?? 0;
-    const y = pb[i] ?? 0;
+  const len = Math.max(pa.nums.length, pb.nums.length);
+  for (let i = 0; i < len; i++) {
+    const x = pa.nums[i] ?? 0;
+    const y = pb.nums[i] ?? 0;
     if (x < y) return true;
     if (x > y) return false;
   }
-  return false;
+  return comparePre(pa.pre, pb.pre) < 0;
 }
 
 function readBundle(path: string): Bundle {
