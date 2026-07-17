@@ -41,3 +41,16 @@ export { loadGatewayServerConfig, gatewayServerConfigSchema } from "./config.ts"
 export type { GatewayServerConfig, ResolvedGatewayServerConfig } from "./config.ts";
 export { startGatewayFromConfig } from "./serve.ts";
 export type { StartGatewayFromConfigOptions } from "./serve.ts";
+export {
+  ChildProcessSandboxHost,
+  createSandboxedConnectorSessions,
+  handleWorkerRequest,
+} from "./connector-sandbox.ts";
+export type {
+  ConnectorDescriptor,
+  SandboxHost,
+  SandboxCallRequest,
+  ChildProcessSandboxHostOptions,
+  WorkerRequest,
+  WorkerReply,
+} from "./connector-sandbox.ts";

@@ -3,6 +3,7 @@ import type { SecretStore } from "@openharness/credentials";
 import { SecretStoreKms, type KmsStore } from "./broker.ts";
 import { createApprovalQueue } from "./approval.ts";
 import { createConnectorSessions } from "./sessions.ts";
+import { createSandboxedConnectorSessions, type ConnectorDescriptor, type SandboxHost } from "./connector-sandbox.ts";
 import { createGithubReadConnector } from "./connectors/github-read.ts";
 import { createNotifyConnector } from "./connectors/notify.ts";
 import type { Connector } from "./connectors/index.ts";
@@ -34,6 +35,14 @@ export interface StartGatewayFromConfigOptions {
    * upstream credentials.
    */
   broker?: KmsStore;
+  /**
+   * Out-of-process connector sandbox (deploy hardening §5). When set, connector
+   * `call()` runs in a warm per-(principal, connector) worker instead of the
+   * gateway process — a deployment builds the `SandboxHost` (choosing the worker
+   * runtime + vetted registry module) and supplies the in-process descriptors
+   * (`tools`/`allowHosts`). When omitted, connectors run in-process as before.
+   */
+  sandbox?: { host: SandboxHost; descriptors: Record<string, ConnectorDescriptor> };
   /**
    * Extra/override connector factories by `type`, merged OVER the built-in
    * registry. Lets a deployment register a private connector, and lets a test
@@ -77,7 +86,9 @@ export async function startGatewayFromConfig(
       policy: config.policy,
       policyVersion: config.policyVersion,
       broker: opts.broker ?? new SecretStoreKms(opts.secretStore),
-      sessions: createConnectorSessions(factories),
+      sessions: opts.sandbox
+        ? createSandboxedConnectorSessions(opts.sandbox)
+        : createConnectorSessions(factories),
       audit: createFileAuditLog(config.auditPath),
       approval: createApprovalQueue(config.approval ?? { timeoutMs: 30_000 }),
     },
