@@ -50,6 +50,37 @@ afterEach(async () => {
   idp = undefined;
 });
 
+test("REFUSES a non-HTTPS OAuth endpoint (an http endpoint would send the code + refresh token in cleartext)", () => {
+  const store = new InMemorySecretStore();
+  // A non-loopback http token endpoint must be rejected at construction.
+  expect(() =>
+    oauthPkceAuthProvider(store, {
+      id: "x",
+      authorizeEndpoint: "https://idp.example/authorize",
+      tokenEndpoint: "http://idp.example/token",
+      clientId: "c",
+    }),
+  ).toThrow(/https|cleartext/i);
+  // A non-loopback http authorize endpoint is likewise rejected.
+  expect(() =>
+    oauthPkceAuthProvider(store, {
+      id: "x",
+      authorizeEndpoint: "http://idp.example/authorize",
+      tokenEndpoint: "https://idp.example/token",
+      clientId: "c",
+    }),
+  ).toThrow(/https|cleartext/i);
+  // Loopback http is allowed — local/dev IdPs run without TLS.
+  expect(() =>
+    oauthPkceAuthProvider(store, {
+      id: "y",
+      authorizeEndpoint: "http://127.0.0.1:9999/authorize",
+      tokenEndpoint: "http://127.0.0.1:9999/token",
+      clientId: "c",
+    }),
+  ).not.toThrow();
+});
+
 test("authorize -> callback round-trip yields a working oauth credential", async () => {
   idp = await startMockIdp(() => ({
     status: 200,

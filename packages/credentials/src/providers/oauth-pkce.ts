@@ -79,7 +79,29 @@ function constantTimeEquals(a: string, b: string): boolean {
  * expiry-aware refresh. Tokens live ONLY in the SecretStore — the returned
  * StoredCredential carries refs + non-secret metadata (expiresAt), never a token.
  */
+/**
+ * Reject a non-HTTPS OAuth endpoint at construction (fail closed). `http:` is
+ * allowed ONLY for a loopback host (a local/dev IdP); anything else would send
+ * the authorization code and the refresh token over cleartext.
+ */
+function assertSecureOAuthEndpoint(field: string, value: string): void {
+  let u: URL;
+  try {
+    u = new URL(value);
+  } catch {
+    throw new Error(`oauth ${field} is not a valid URL: ${JSON.stringify(value)}`);
+  }
+  const host = u.hostname;
+  const isLoopback = host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "[::1]";
+  if (u.protocol !== "https:" && !(u.protocol === "http:" && isLoopback))
+    throw new Error(
+      `oauth ${field} must be https (got ${u.protocol}//${host}) — an http endpoint would send the authorization code and refresh token in cleartext`,
+    );
+}
+
 export function oauthPkceAuthProvider(store: SecretStore, config: OAuthPkceConfig): AuthProvider {
+  assertSecureOAuthEndpoint("authorizeEndpoint", config.authorizeEndpoint);
+  assertSecureOAuthEndpoint("tokenEndpoint", config.tokenEndpoint);
   const id = config.id ?? "oauth-pkce";
   const redirectPath = config.redirectPath ?? "/callback";
   const now = config.now ?? (() => Date.now());
