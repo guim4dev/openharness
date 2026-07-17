@@ -42,6 +42,8 @@ Usage:
   openharness audit verify <file>             recompute the audit hash chain
   openharness audit export <file> [--since ISO] [--until ISO] [--type t1,t2] [--out FILE]
                                               compliance export (NDJSON + integrity manifest)
+  openharness audit push <file> --server <url> [--source id] [--state path] [--token t]
+                                              ship the local log to the authoritative server anchor
 
 Docs: https://github.com/guim4dev/openharness`;
 

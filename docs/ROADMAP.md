@@ -4,6 +4,11 @@ Where the project is, where it's going, and *why* in that order. This is a
 direction document, not a promise of dates. The [vision](vision.md) holds the
 decisions (D1–D12); this holds the sequence.
 
+> **Want to try what's already built, locally?** [`RUNLOCAL.md`](RUNLOCAL.md) is a
+> verified, copy-pasteable end-to-end walkthrough — chat, authoring, signed
+> bundles + tamper refusal, the audit anchor, and the governed gateway — all on
+> your own machine, no cloud.
+
 ## The through-line
 
 Governance that a determined insider can't route around, without taking

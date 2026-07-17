@@ -22,10 +22,15 @@ minimal TypeScript agent harness, and adds the layer Pi intentionally leaves out
 > Status: the walking skeleton runs (chat with a harness today with your own API
 > key — see below), the governance data plane is built (MCP bridge, deny-by-default
 > policy + secret redaction, hash-chained audit, ed25519-signed definition bundles,
-> a thin bundle/audit server), and `openharness build` produces a branded, signed,
-> ready-to-package desktop app. See [`docs/DEMO.md`](docs/DEMO.md) for the 90-second
-> story, [`docs/vision.md`](docs/vision.md) for the full thinking, and
-> [`docs/specs/`](docs/specs) for per-slice designs.
+> a thin bundle/audit server), the **v2 governed remote MCP gateway** runs (a pinned
+> catalog, server-side policy, DPoP-authenticated requests with no token passthrough,
+> a post-decision credential broker, an authoritative audit log), the **audit anchor**
+> is closed end to end (a shipper feeds the local hash-chain to the server, which
+> refuses any forked/re-chained submission), and `openharness build` produces a
+> branded, signed, ready-to-package desktop app. **Want to try all of it on your own
+> machine?** → [`docs/RUNLOCAL.md`](docs/RUNLOCAL.md). See [`docs/DEMO.md`](docs/DEMO.md)
+> for the 90-second story, [`docs/vision.md`](docs/vision.md) for the full thinking,
+> and [`docs/specs/`](docs/specs) for per-slice designs.
 
 ## Try it in 60 seconds
 
@@ -47,6 +52,22 @@ Want your own harness instead of the bundled example? `openharness init my-harne
 scaffolds a minimal, valid, offline-safe one to start from, and
 `openharness doctor my-harness` preflights it before you build (see
 [`docs/AUTHORING.md`](docs/AUTHORING.md)).
+
+### Run everything locally
+
+[**`docs/RUNLOCAL.md`**](docs/RUNLOCAL.md) is a verified, copy-pasteable
+walkthrough of the whole stack on your own machine — no cloud, no accounts. Each
+step is grounded in a command that was actually run against `main`:
+
+1. one live chat turn (BYO key)
+2. author your own harness — `init` → `doctor` → chat
+3. sign a bundle, verify it, watch a tampered one get refused
+4. the audit anchor — run the server, `audit push` a log, watch a forged one get refused
+5. the v2 governed gateway — `serve` a config, see edge auth reject a request with no DPoP
+6. build a branded desktop app
+
+The two CLIs are `npm run chat -- <args>` (authoring, bundles, audit, the
+server) and `npm run gateway -- <args>` (the v2 gateway).
 
 Your key is written to an encrypted on-disk store (never logged, never printed).
 Prefer a config file over env vars? Create `accounts.json` in your OpenHarness
@@ -110,6 +131,7 @@ subscription, or local runtime) sits underneath.
 
 | | |
 |---|---|
+| [`docs/RUNLOCAL.md`](docs/RUNLOCAL.md) | Run everything locally — a verified, copy-pasteable end-to-end walkthrough. |
 | [`docs/DEMO.md`](docs/DEMO.md) | The 90-second story: build two brands → verify → flip one byte → refusal. |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | How the pieces fit — the package map, the in-process governance data plane, the Pi seams. |
 | [`docs/AUTHORING.md`](docs/AUTHORING.md) | Everything a `HarnessDefinition` directory can contain, and how to ship it. |
