@@ -84,3 +84,49 @@ test("a statement without our subject name is rejected (attestation for another 
   expect(v.verified).toBe(false);
   expect(v.reason).toMatch(/no subject named/);
 });
+
+test("a trusted key signing a NON-provenance document is not laundered into a verdict (cross-type)", () => {
+  const { publicKey, privateKey } = keypair();
+  // A different attestation kind the same trusted key might legitimately sign,
+  // that happens to carry the subject + builder fields.
+  const env = signProvenance(
+    statement({ _type: "https://in-toto.io/Statement/v1", predicateType: "https://example.com/other-predicate" }),
+    privateKey,
+  );
+  const v = verifyProvenance({ name: NAME, sha256: DIGEST }, env, { keys: [publicKey], allowedBuilders: [BUILDER] });
+  expect(v.verified).toBe(false);
+  expect(v.reason).toMatch(/predicateType/);
+});
+
+test("a wrong statement _type is rejected even under a trusted signature", () => {
+  const { publicKey, privateKey } = keypair();
+  const env = signProvenance(statement({ _type: "https://example.com/NOT-in-toto" }), privateKey);
+  const v = verifyProvenance({ name: NAME, sha256: DIGEST }, env, { keys: [publicKey], allowedBuilders: [BUILDER] });
+  expect(v.verified).toBe(false);
+  expect(v.reason).toMatch(/_type/);
+});
+
+test("a payloadType other than in-toto is rejected", () => {
+  const { publicKey, privateKey } = keypair();
+  const env = signProvenance(statement(), privateKey);
+  env.payloadType = "text/plain"; // breaks the signature too, but assert the type gate independently
+  const v = verifyProvenance({ name: NAME, sha256: DIGEST }, env, { keys: [publicKey], allowedBuilders: [BUILDER] });
+  expect(v.verified).toBe(false);
+});
+
+test("malformed envelopes are a verdict, NEVER a throw (no-throw contract)", () => {
+  const trust = { keys: [keypair().publicKey], allowedBuilders: [BUILDER] };
+  const cases: unknown[] = [
+    null,
+    {},
+    { payload: "x", payloadType: "y" }, // no signatures array
+    { payload: "x", payloadType: "y", signatures: [{}] }, // sig not a string
+    { payload: "x", payloadType: "y", signatures: [{ sig: 42 }] },
+    { payloadType: "y", signatures: [] }, // no payload
+    { payload: 5, payloadType: "y", signatures: [] }, // payload not a string
+  ];
+  for (const c of cases) {
+    expect(() => verifyProvenance({ name: NAME, sha256: DIGEST }, c as never, trust)).not.toThrow();
+    expect(verifyProvenance({ name: NAME, sha256: DIGEST }, c as never, trust).verified).toBe(false);
+  }
+});

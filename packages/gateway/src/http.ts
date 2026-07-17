@@ -72,6 +72,14 @@ function serverError(res: ServerResponse): void {
 export async function startGatewayHttp(opts: GatewayHttpOptions): Promise<GatewayHttpServer> {
   const path = opts.path ?? "/mcp";
   const tokenPath = opts.tokenPath ?? "/token";
+  // A path must be a real absolute route. An empty string would make every
+  // `startsWith` match — silently shadowing every route (e.g. tokenPath:"" would
+  // route every POST into the token exchange, making /mcp unreachable).
+  if (!path.startsWith("/")) throw new Error(`gateway path must start with "/" (got ${JSON.stringify(path)})`);
+  if (!tokenPath.startsWith("/")) throw new Error(`gateway tokenPath must start with "/" (got ${JSON.stringify(tokenPath)})`);
+  // Route match with a boundary: exactly the path, or the path followed by a
+  // query string — so `/token` does NOT also match `/tokenfoo` or `/token/x`.
+  const routeIs = (u: string, base: string): boolean => u === base || u.startsWith(`${base}?`);
   const host = opts.host ?? "127.0.0.1";
   const log = opts.logger ?? ((m: string, err?: unknown) => console.error(`[openharness/gateway] ${m}`, err ?? ""));
   // One replay guard for the server: a DPoP proof id authenticates exactly one
@@ -96,7 +104,7 @@ export async function startGatewayHttp(opts: GatewayHttpOptions): Promise<Gatewa
     // 0. Token exchange (deploy hardening §3): NOT DPoP-authenticated — it is the
     //    bootstrap that ISSUES the DPoP-bound token, gated instead by the IdP
     //    subject token. Only mounted when an IdP verifier + signing key are set.
-    if ((req.method ?? "").toUpperCase() === "POST" && url.startsWith(tokenPath) && opts.idp && opts.gatewayPrivateKeyPem) {
+    if ((req.method ?? "").toUpperCase() === "POST" && routeIs(url, tokenPath) && opts.idp && opts.gatewayPrivateKeyPem) {
       const h = req.headers as Record<string, string | undefined>;
       const auth = hdr(h, "authorization");
       const subjectToken = auth?.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
@@ -123,7 +131,7 @@ export async function startGatewayHttp(opts: GatewayHttpOptions): Promise<Gatewa
       return;
     }
 
-    if (!url.startsWith(path)) {
+    if (!routeIs(url, path)) {
       res.writeHead(404).end();
       return;
     }

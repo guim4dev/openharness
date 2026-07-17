@@ -59,6 +59,11 @@ export interface ProvenanceVerdict {
   builderId?: string;
 }
 
+/** The types real SLSA/in-toto provenance carries — bound, not merely typed. */
+const IN_TOTO_PAYLOAD_TYPE = "application/vnd.in-toto+json";
+const IN_TOTO_STATEMENT_V1 = "https://in-toto.io/Statement/v1";
+const SLSA_PROVENANCE_V1 = "https://slsa.dev/provenance/v1";
+
 /** DSSE Pre-Authentication Encoding: what is actually signed/verified. */
 function pae(payloadType: string, payload: Buffer): Buffer {
   const t = Buffer.from(payloadType, "utf8");
@@ -81,11 +86,22 @@ export function sha256Hex(bytes: Buffer | Uint8Array): string {
  * data, not an exception) — it throws only on a structurally unusable envelope.
  */
 export function verifyProvenance(artifact: ArtifactRef, envelope: DsseEnvelope, trust: TrustRoot): ProvenanceVerdict {
+  // 0. Structural guard. A malformed / hand-forged envelope (missing payload,
+  //    non-array signatures, a non-string sig) is a FAILED verification, not a
+  //    crash — a throw here would let a malicious upstream turn provenance
+  //    verification into a denial of the whole doctor run. Honor the no-throw
+  //    contract for every shape an attacker controls.
+  if (envelope == null || typeof envelope !== "object") return { verified: false, reason: "envelope is not an object" };
+  if (typeof envelope.payload !== "string") return { verified: false, reason: "envelope.payload is missing" };
+  if (typeof envelope.payloadType !== "string") return { verified: false, reason: "envelope.payloadType is missing" };
+  if (!Array.isArray(envelope.signatures)) return { verified: false, reason: "envelope.signatures is missing" };
+
   const payload = Buffer.from(envelope.payload, "base64");
   const signed = pae(envelope.payloadType, payload);
 
   // 1. At least one signature must verify under some trusted key.
   const anyKeyVerifies = envelope.signatures.some((s) => {
+    if (!s || typeof s.sig !== "string") return false;
     const sig = Buffer.from(s.sig, "base64");
     return trust.keys.some((pem) => {
       try {
@@ -97,6 +113,13 @@ export function verifyProvenance(artifact: ArtifactRef, envelope: DsseEnvelope, 
   });
   if (!anyKeyVerifies) return { verified: false, reason: "no trusted key verified the envelope signature" };
 
+  // 1b. The payload type is bound into the PAE (so it cannot be relabeled), but
+  //     its VALUE must also be the in-toto type — otherwise any DSSE document a
+  //     trusted key signs (a different attestation kind, a Rekor entry) could be
+  //     laundered into a "verified provenance" verdict (cross-type confusion).
+  if (envelope.payloadType !== IN_TOTO_PAYLOAD_TYPE)
+    return { verified: false, reason: `unexpected payloadType '${envelope.payloadType}'` };
+
   // 2. Parse the signed statement (only AFTER the signature is trusted).
   let stmt: InTotoStatement;
   try {
@@ -104,6 +127,13 @@ export function verifyProvenance(artifact: ArtifactRef, envelope: DsseEnvelope, 
   } catch {
     return { verified: false, reason: "signed payload is not valid JSON" };
   }
+  if (stmt == null || typeof stmt !== "object") return { verified: false, reason: "signed payload is not an object" };
+
+  // 2b. Bind the statement/predicate types — this IS a SLSA in-toto provenance,
+  //     not some other signed document (the cross-type confused-deputy defense).
+  if (stmt._type !== IN_TOTO_STATEMENT_V1) return { verified: false, reason: `unexpected statement _type '${stmt._type}'` };
+  if (stmt.predicateType !== SLSA_PROVENANCE_V1)
+    return { verified: false, reason: `unexpected predicateType '${stmt.predicateType}'` };
 
   // 3. Subject must name our artifact AND carry a sha256 that matches its bytes.
   const subject = stmt.subject?.find((s) => s.name === artifact.name);
@@ -129,7 +159,7 @@ export function verifyProvenance(artifact: ArtifactRef, envelope: DsseEnvelope, 
  * as-is; `sha256Hex` computes a subject digest from artifact bytes.
  */
 export function signProvenance(statement: InTotoStatement, privateKeyPem: string, keyid?: string): DsseEnvelope {
-  const payloadType = "application/vnd.in-toto+json";
+  const payloadType = IN_TOTO_PAYLOAD_TYPE;
   const payload = Buffer.from(JSON.stringify(statement), "utf8");
   const sig = sign(null, pae(payloadType, payload), privateKeyPem).toString("base64");
   return { payload: payload.toString("base64"), payloadType, signatures: [{ ...(keyid ? { keyid } : {}), sig }] };

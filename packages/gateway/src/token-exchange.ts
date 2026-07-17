@@ -1,3 +1,4 @@
+import { createPublicKey } from "node:crypto";
 import { mintGatewayToken, type Deny, type GatewayClaims } from "./auth.ts";
 
 /**
@@ -45,6 +46,14 @@ export async function exchangeToken(
 ): Promise<ExchangedToken | Deny> {
   if (!req.subjectToken) return { deny: "no subject token" };
   if (!req.clientPublicKeyPem) return { deny: "no client key to bind" };
+  // Reject a bound key that is not a real public key at EXCHANGE time (a clean
+  // deny) rather than minting a token bound to garbage — which would "succeed"
+  // here and only fail opaquely at the first MCP call (the proof can't verify).
+  try {
+    createPublicKey(req.clientPublicKeyPem);
+  } catch {
+    return { deny: "client key is not a valid public key" };
+  }
 
   const identity = await opts.idp.verifySubjectToken(req.subjectToken);
   if ("deny" in identity) return identity;

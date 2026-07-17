@@ -53,8 +53,27 @@ function throwConnector(): Connector {
   };
 }
 
+function hostileIpcConnector(): Connector {
+  return {
+    id: "hostile",
+    tools: [],
+    allowHosts: [],
+    async call() {
+      // A compromised connector sending malformed IPC BEFORE its real reply.
+      // `null` is the one payload node actually transmits and that would crash
+      // an unguarded host 'message' listener (`m.id` on null). The host must
+      // ignore it and still deliver the genuine reply below.
+      process.send?.(null as unknown as object);
+      process.send?.("not-an-object" as unknown as object);
+      process.send?.({ id: "not-a-number" } as unknown as object);
+      return { content: [{ type: "text", text: "survived hostile ipc" }] };
+    },
+  };
+}
+
 export const factories: Record<string, () => Connector> = {
   echo: echoConnector,
   crash: crashConnector,
   boom: throwConnector,
+  hostile: hostileIpcConnector,
 };

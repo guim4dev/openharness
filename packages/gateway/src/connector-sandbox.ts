@@ -2,7 +2,7 @@ import { fork, type ChildProcess } from "node:child_process";
 import type { Connector, ConnectorResult } from "./connectors/index.ts";
 import type { ToolCatalog } from "./catalog.ts";
 import type { ConnectorSessions } from "./sessions.ts";
-import type { SandboxCallRequest, WorkerReply, WorkerRequest } from "./connector-worker-protocol.ts";
+import type { SandboxCallRequest, WorkerRequest } from "./connector-worker-protocol.ts";
 
 export { handleWorkerRequest } from "./connector-worker-protocol.ts";
 export type { SandboxCallRequest, WorkerReply, WorkerRequest } from "./connector-worker-protocol.ts";
@@ -100,6 +100,12 @@ export class ChildProcessSandboxHost implements SandboxHost {
 
   invoke(principal: string, connectorId: string, req: SandboxCallRequest): Promise<ConnectorResult> {
     if (this.closed) return Promise.reject(new Error("sandbox host closed"));
+    // INVARIANT: one worker serves exactly one (principal, connector). Reply
+    // correlation trusts the worker's self-reported `id`, so a compromised
+    // worker could cross-wire replies among ITS OWN in-flight calls — but every
+    // such call is the same principal + connector + credential, so nothing
+    // crosses a trust boundary. This holds ONLY while workers are never shared
+    // across principals; a future pool that shares one must re-key correlation.
     const key = `${principal}\0${connectorId}`;
     const entry = this.workers.get(key) ?? this.spawn(key, connectorId);
     const id = entry.nextId++;
@@ -137,13 +143,21 @@ export class ChildProcessSandboxHost implements SandboxHost {
     });
     const entry: WorkerEntry = { child, pending: new Map(), nextId: 1 };
 
-    child.on("message", (m: WorkerReply) => {
+    child.on("message", (raw: unknown) => {
+      // The worker runs the UNTRUSTED connector — treat its IPC as hostile. A
+      // throw inside a 'message' listener becomes an uncaughtException that would
+      // crash the SHARED gateway process (a single `process.send(null)` from a
+      // compromised connector), defeating the very containment this sandbox
+      // exists to provide. So validate the shape and never let it throw.
+      if (raw === null || typeof raw !== "object") return;
+      const m = raw as { id?: unknown; ok?: unknown; result?: unknown; error?: unknown };
+      if (typeof m.id !== "number") return;
       const p = entry.pending.get(m.id);
       if (!p) return;
       clearTimeout(p.timer);
       entry.pending.delete(m.id);
-      if (m.ok) p.resolve(m.result);
-      else p.reject(new Error(m.error));
+      if (m.ok === true) p.resolve((m.result ?? { content: [] }) as ConnectorResult);
+      else p.reject(new Error(typeof m.error === "string" ? m.error : "connector error"));
     });
 
     const fail = (reason: string) => {

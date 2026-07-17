@@ -231,7 +231,16 @@ export async function runDoctor(defDir: string, opts: RunDoctorOptions = {}): Pr
       if (!run) continue; // a locally-installed binary fetches nothing to attest
       const bundle = bundles[run.target];
       if (bundle) {
-        const v = verifyProvenance({ name: run.target, sha256: bundle.sha256 }, bundle.envelope, trustRoot);
+        // Defense in depth: verifyProvenance is contracted not to throw, but a
+        // malformed attacker-supplied bundle must NEVER take down the whole
+        // doctor run — any throw here becomes a provenance failure, not an
+        // uncaught exception that loses every other check.
+        let v;
+        try {
+          v = verifyProvenance({ name: run.target, sha256: bundle.sha256 }, bundle.envelope, trustRoot);
+        } catch (e) {
+          v = { verified: false, reason: `provenance verification threw: ${(e as Error)?.message ?? e}` };
+        }
         if (!v.verified)
           problems.push({
             level: "error",

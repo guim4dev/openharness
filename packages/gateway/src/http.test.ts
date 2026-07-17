@@ -34,7 +34,7 @@ afterEach(async () => {
   running = undefined;
 });
 
-async function boot(policyRaw: unknown = { default: "allow", rules: [] }) {
+async function boot(policyRaw: unknown = { default: "allow", rules: [] }, extra: Record<string, unknown> = {}) {
   const gateway = generateAuthKeypair();
   const store = new InMemorySecretStore();
   await store.set("upstream:github", "ghp_orgtoken");
@@ -52,6 +52,7 @@ async function boot(policyRaw: unknown = { default: "allow", rules: [] }) {
       audit,
       approval: createApprovalQueue({ timeoutMs: 2_000 }),
     },
+    ...extra,
   });
   return { gateway, url: running.url, audit: captured };
 }
@@ -91,6 +92,70 @@ test("e2e over real HTTP: DPoP-authenticated client runs a governed call end-to-
   } finally {
     await mcp.close();
   }
+});
+
+test("e2e over real HTTP: IdP token-exchange issues a DPoP token that then runs a governed call", async () => {
+  const stubIdp = {
+    async verifySubjectToken(t: string) {
+      return t === "valid-oidc" ? { sub: "alice@acme.com", groups: ["eng"] } : { deny: "bad" };
+    },
+  };
+  const { gateway, url } = await boot({ default: "allow", rules: [] }, { idp: stubIdp });
+  const tokenUrl = url.replace("/mcp", "/token");
+  const client = generateAuthKeypair();
+
+  // Exchange the IdP subject token for a DPoP-bound gateway token.
+  const res = await fetch(tokenUrl, {
+    method: "POST",
+    headers: {
+      authorization: "Bearer valid-oidc",
+      "x-oh-dpop-key": Buffer.from(client.publicKey).toString("base64url"),
+      "x-oh-harness": "acme-assistant",
+      "x-oh-defversion": "1.0.0",
+      "x-oh-session": "s1",
+    },
+  });
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as { access_token: string; token_type: string };
+  expect(body.token_type).toBe("DPoP");
+
+  // Use the exchanged token for a real governed MCP call.
+  const dpopFetch = createDpopFetch(body.access_token, client.privateKey, client.publicKey, undefined, undefined, gateway.publicKey);
+  const mcp = new Client({ name: "harness", version: "0" }, { capabilities: {} });
+  await mcp.connect(new StreamableHTTPClientTransport(new URL(url), { fetch: dpopFetch as unknown as typeof fetch }));
+  try {
+    const call = await mcp.callTool({ name: "github__list_issues", arguments: { owner: "acme", repo: "app" } });
+    expect(call.isError).toBeFalsy();
+  } finally {
+    await mcp.close();
+  }
+
+  // A forged subject token is refused — no token issued.
+  const bad = await fetch(tokenUrl, {
+    method: "POST",
+    headers: { authorization: "Bearer forged", "x-oh-dpop-key": Buffer.from(client.publicKey).toString("base64url") },
+  });
+  expect(bad.status).toBe(401);
+
+  // A garbage bound key is refused at exchange time (clean deny), not minted.
+  const badKey = await fetch(tokenUrl, {
+    method: "POST",
+    headers: { authorization: "Bearer valid-oidc", "x-oh-dpop-key": Buffer.from("not-a-real-key").toString("base64url") },
+  });
+  expect(badKey.status).toBe(401);
+
+  // The token route does NOT match a sibling prefix path.
+  const sibling = await fetch(url.replace("/mcp", "/tokenfoo"), {
+    method: "POST",
+    headers: { authorization: "Bearer valid-oidc", "x-oh-dpop-key": Buffer.from(client.publicKey).toString("base64url") },
+  });
+  expect(sibling.status).toBe(404);
+});
+
+test("startGatewayHttp rejects an empty path/tokenPath (would shadow every route)", async () => {
+  const stubIdp = { async verifySubjectToken() { return { sub: "a", groups: [] }; } };
+  await expect(boot({ default: "allow", rules: [] }, { idp: stubIdp, tokenPath: "" })).rejects.toThrow(/tokenPath/);
+  await expect(boot({ default: "allow", rules: [] }, { path: "" })).rejects.toThrow(/path/);
 });
 
 test("e2e over real HTTP: a client WITHOUT DPoP is rejected at the edge (401)", async () => {

@@ -67,14 +67,39 @@ export class KmsBrokerStore implements KmsStore {
   async resolve(upstreamId: string): Promise<UpstreamCredential | undefined> {
     const wrapped = await this.secrets.fetch(upstreamId);
     if (!wrapped) return undefined;
+    // Bind `meta` into the decrypt context too: `meta` (e.g. a connector's
+    // baseUrl) rides in the secrets manager alongside the ciphertext, so if it
+    // were NOT authenticated an attacker with secrets-manager write could keep
+    // the valid ciphertext+context and only rewrite `meta.baseUrl` to their own
+    // host — sending the real credential to the attacker. Folding it into the
+    // AAD makes that tamper fail the decrypt, exactly like a ciphertext swap.
+    const context = boundContext(wrapped.encryptionContext, wrapped.meta);
     const plaintext = await this.kms.decrypt({
       keyId: wrapped.keyId,
       ciphertext: wrapped.ciphertext,
-      ...(wrapped.encryptionContext ? { encryptionContext: wrapped.encryptionContext } : {}),
+      ...(context ? { encryptionContext: context } : {}),
     });
     const secret = Buffer.from(plaintext).toString("utf8");
     return wrapped.meta ? { secret, meta: wrapped.meta } : { secret };
   }
+}
+
+/**
+ * The effective encryption context = the caller's context PLUS the non-secret
+ * `meta` (namespaced under `meta:` to avoid collision), so meta is authenticated.
+ * Returns `undefined` when empty so an empty context is OMITTED from the KMS call
+ * (a real KMS may not treat `{}` and "absent" identically). This is the ONE place
+ * that combines the two; `resolve` and `LocalKms.encrypt` both route through it,
+ * so the encrypt-side and decrypt-side AAD are symmetric by construction.
+ */
+function boundContext(
+  encryptionContext: Record<string, string> | undefined,
+  meta: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  const combined: Record<string, string> = {};
+  if (encryptionContext) for (const [k, v] of Object.entries(encryptionContext)) combined[k] = v;
+  if (meta) for (const [k, v] of Object.entries(meta)) combined[`meta:${k}`] = v;
+  return Object.keys(combined).length ? combined : undefined;
 }
 
 /** Canonical AAD bytes for an encryption context: key-sorted JSON, or empty. */
@@ -82,6 +107,11 @@ function aadBytes(ctx: Record<string, string> | undefined): Buffer | undefined {
   if (!ctx) return undefined;
   const keys = Object.keys(ctx).sort();
   if (keys.length === 0) return undefined;
+  // Fail closed on a non-string value (a mistyped/adversarial secrets manager):
+  // `{k:null}` and `{k:undefined}` would otherwise JSON-encode identically and
+  // let a blob decrypt under a context it should not.
+  for (const k of keys)
+    if (typeof ctx[k] !== "string") throw new Error("kms: encryption context values must be strings");
   return Buffer.from(JSON.stringify(keys.map((k) => [k, ctx[k]])));
 }
 
@@ -107,11 +137,17 @@ export class LocalKms implements KmsClient {
    * encrypts the secret out-of-band and stores the blob in the secrets manager;
    * the gateway only ever decrypts.
    */
-  encrypt(input: { keyId: string; plaintext: string; encryptionContext?: Record<string, string> }): Uint8Array {
+  encrypt(input: {
+    keyId: string;
+    plaintext: string;
+    encryptionContext?: Record<string, string>;
+    /** Non-secret meta to bind into the AAD too — matches what `resolve` binds. */
+    meta?: Record<string, string>;
+  }): Uint8Array {
     const key = this.mustKey(input.keyId);
     const iv = randomBytes(12);
     const c = createCipheriv("aes-256-gcm", key, iv);
-    const aad = aadBytes(input.encryptionContext);
+    const aad = aadBytes(boundContext(input.encryptionContext, input.meta));
     if (aad) c.setAAD(aad);
     const data = Buffer.concat([c.update(input.plaintext, "utf8"), c.final()]);
     return Buffer.concat([iv, c.getAuthTag(), data]);

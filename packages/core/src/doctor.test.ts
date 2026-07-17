@@ -386,3 +386,17 @@ test("without an attestations option, no provenance check runs (opt-in)", async 
   expect(codes(report.problems)).not.toContain("artifact-provenance-failed");
   expect(codes(report.problems)).not.toContain("artifact-provenance-missing");
 });
+
+test("a malformed provenance bundle is a clean provenance failure, never a runDoctor crash", async () => {
+  const { publicKey } = provKeypair();
+  const dir = writeDef(baseManifest({ mcp: { servers: { fs: provServer } } }));
+  // An attacker-shaped envelope (no signatures array) must not throw out of runDoctor.
+  const report = await runDoctor(dir, {
+    attestations: {
+      trustRoot: { keys: [publicKey], allowedBuilders: [PROV_BUILDER] },
+      bundles: { [PROV_TARGET]: { sha256: "00".repeat(32), envelope: { payload: "x", payloadType: "y" } as never } },
+    },
+  });
+  expect(report.ok).toBe(false);
+  expect(codes(report.problems)).toContain("artifact-provenance-failed");
+});

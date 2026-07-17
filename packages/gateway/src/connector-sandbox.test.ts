@@ -90,6 +90,22 @@ test("a connector THROW (not a crash) is reported as an error result without kil
   }
 });
 
+test("malformed IPC from a compromised worker is IGNORED, not fatal — the host survives and the real reply still lands", async () => {
+  const h = host();
+  try {
+    // Before the fix, `process.send(null)` in the worker threw in the host's
+    // 'message' listener → uncaughtException → the whole gateway process exits.
+    // Now it is ignored and the connector's genuine reply is delivered.
+    const r = await h.invoke("alice", "hostile", { toolName: "t", args: {}, cred: { secret: "s" } });
+    expect(r.content[0].text).toBe("survived hostile ipc");
+    // The host is intact — a subsequent call on another connector works.
+    const r2 = await h.invoke("alice", "echo", { toolName: "t", args: {}, cred: { secret: "s" } });
+    expect(JSON.parse(r2.content[0].text).toolName).toBe("t");
+  } finally {
+    await h.close();
+  }
+});
+
 test("createSandboxedConnectorSessions exposes descriptors in-process and routes call() through the host", async () => {
   const h = host();
   const descriptors: Record<string, ConnectorDescriptor> = {
