@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { readFile, writeFile, mkdir, access, chmod } from "node:fs/promises";
+import { readFile, writeFile, mkdir, chmod, rename } from "node:fs/promises";
 import { join } from "node:path";
 
 export interface SecretStore {
@@ -38,9 +38,18 @@ export class EncryptedFileSecretStore implements SecretStore {
     const keyFile = join(dir, "secret.key");
     let key: Buffer;
     try {
-      await access(keyFile);
       key = Buffer.from(await readFile(keyFile, "utf8"), "base64");
-    } catch {
+    } catch (e) {
+      // ONLY generate a new key when the file genuinely does not exist. A key
+      // that exists but is momentarily unreadable (EACCES/EBUSY/EIO — an AV or
+      // backup lock, a perms change, a concurrent writer) must NOT be
+      // regenerated: overwriting it would permanently destroy the ability to
+      // decrypt every stored secret. Fail loud instead.
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw new Error(
+          `secret key at ${keyFile} exists but could not be read — refusing to regenerate it (that would permanently destroy every stored secret): ${(e as Error).message}`,
+        );
+      }
       key = randomBytes(32);
       await writeFile(keyFile, key.toString("base64"), { mode: 0o600 });
       await chmod(keyFile, 0o600);
@@ -49,14 +58,27 @@ export class EncryptedFileSecretStore implements SecretStore {
     let data: Record<string, { iv: string; tag: string; data: string }> = {};
     try {
       data = JSON.parse(await readFile(file, "utf8"));
-    } catch {
-      /* new store */
+    } catch (e) {
+      // A MISSING file is a genuine new store. A file that exists but is
+      // unreadable or corrupt must NOT be treated as empty — starting empty and
+      // letting the next set() flush over it would silently drop every secret.
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw new Error(
+          `secrets store at ${file} exists but could not be read or parsed — refusing to start with an empty store (the next write would drop every secret): ${(e as Error).message}`,
+        );
+      }
+      /* ENOENT → a genuinely new store */
     }
     return new EncryptedFileSecretStore(key, file, data);
   }
 
   private async flush() {
-    await writeFile(this.file, JSON.stringify(this.data), { mode: 0o600 });
+    // Atomic write: a crash or concurrent write mid-flush must not truncate/
+    // corrupt the whole store. Write a temp file, then rename over the target
+    // (atomic on the same filesystem — the temp lives in the same dir).
+    const tmp = `${this.file}.tmp-${randomBytes(6).toString("hex")}`;
+    await writeFile(tmp, JSON.stringify(this.data), { mode: 0o600 });
+    await rename(tmp, this.file);
   }
 
   async get(ref: string) {
