@@ -4,7 +4,10 @@
 > far. Update it as decisions change; treat it as the single source of truth for
 > *why* the project is shaped the way it is.
 
-Last updated: 2026-07-14 (after an autonomous build night).
+Last updated: 2026-07-18 (added related work — §14 OpenWork, our closest analogue /
+north star; §15 CodeNomad, a desktop-cockpit UX reference. §14 corrected after
+verified deep research: OpenWork's Den control plane IS fully self-hostable — our
+wedge is license purity + verifiable governance, NOT self-hosting).
 
 ---
 
@@ -501,3 +504,163 @@ hand-built connectors. No governance work is wasted.
 ### References (OpenConnector)
 
 - GitHub — https://github.com/oomol-lab/open-connector
+
+## 14. Related work: OpenWork — the closest analogue, our north star (2026-07-17)
+
+[OpenWork](https://github.com/different-ai/openwork) (Different AI, Inc., TypeScript,
+~17k stars, `different-ai/openwork`, shipping fast — v0.17.32 with ~2k releases as
+of 2026-07-17) is "**a free, open-source desktop app made for sharing AI
+workflows**" — "an **open-source alternative to Claude Cowork and Codex** for
+macOS, Windows, and Linux," **powered by opencode**. You run agents, skills, and
+MCPs locally in one click; you can also add **one OpenWork MCP** (remote server at
+`api.openworklabs.com/mcp/agent`, exposing `search_capabilities` +
+`execute_capability`) into Claude Code, Cursor, Codex, or ChatGPT and reuse the
+same skills/MCPs across every tool. BYO keys, 50+ LLMs. Its distribution primitive
+is a killer: **package your entire setup — skills, MCP servers, config — into a
+single link** teammates import in one click ("OpenWork Connect"). The org layer,
+**"OpenWork Den," is "the control plane for managing OpenWork across a team or
+organization"**: provider provisioning + access control, member/team management,
+**desktop policies**, local-model restrictions, **app version control**, and a
+**skill/plugin marketplace with role-based assignment**. License is **dual — MIT for
+the bulk, but the *entire* `/ee` tree is Fair Source**: all of the Den control plane
+(`den-api`, `den-controller`, `den-web`, `den-worker-proxy`/`-runtime`,
+`den-admin-mcp`, `den-db`…) lives under `/ee` at **FSL-1.1-MIT** (Functional Source
+License — no competing commercial use, internal use permitted, auto-converts to MIT
+on the 2nd anniversary of each release). **Crucially — and this refuted our first
+read (verified 2026-07-18, repo docs + a live Helm chart) — the Den control plane is
+fully self-hostable, NOT SaaS-only**: an official chart
+(`oci://ghcr.io/different-ai/charts/openwork-ee`, real on GHCR, 32 tags 0.17.2→.32)
++ Docker packaging deploy Den web + controller (+ optional inference) into the
+company's own VPC/cluster, with agent **API + MCP traffic routed through the
+customer's own Den origin** (`<baseUrl>/api/den/…`) — no OpenWork cloud in the loop,
+plus a documented **no-egress** config for isolated clusters. In desktop mode files
+stay local and prompts go straight to the chosen LLM provider. OpenWork Cloud
+(`api.openworklabs.com`, optional sandboxed workers) is the *hosted option*, not the
+only one. Priced free desktop → Team Starter ($10/seat/mo after 5 free) → Enterprise
+(SSO + BYO inference).
+
+**Category note (the key point — inverted from §11–13).** Unlike Omnigent (a
+meta-harness *above* us), Odysseus (a single-user product *on* us), or OpenConnector
+(a component *beneath* us), **OpenWork is the same category and the same product
+shape we are building** — an open-source, brandable/shareable harness a team runs
+as a **desktop app**, running **skills + MCPs**, on a **minimal TS engine** (opencode
+↔ our Pi fork), with an **org control plane** (policies, versioning, a
+skill/plugin marketplace, RBAC) and **one-click distribution to teammates**. The
+convergence is near 1:1 and independent (they ship on opencode; we forked Pi). This
+is validation, not threat: **it proves the exact product we're betting on has real
+demand (17k stars, an enterprise tier, a fast release cadence) — and it is our
+north star for product/UX/distribution.**
+
+**What to borrow (product & UX — study it directly):**
+- **The one-link setup primitive.** "Package your entire setup → a single link →
+  one-click import" is the distribution UX to beat. Our verifiable analogue already
+  exists — the **signed `.ohbundle`** — but their *frictionlessness* (a link, not a
+  file + a pubkey) is the bar. Close the gap without dropping the signature/pin.
+- **Harness-as-an-MCP.** OpenWork exposes *itself* as one remote MCP
+  (`search_capabilities`/`execute_capability`) that plugs into any other harness.
+  Our v2 gateway is already an MCP server — making an OpenHarness-built harness
+  **consumable from Claude Code/Cursor/Codex the same way** is a cheap, high-leverage
+  surface we should consider (it turns every governed harness into a drop-in tool
+  for the harnesses people already use).
+- **The "Den" feature checklist** (provider provisioning, desktop policies, app
+  version control, marketplace + role-based assignment) is a concrete, market-tested
+  spec for what our own org control plane should cover — a direct reference for the
+  future control plane (cf. §11's policy-model note).
+- **BYO-keys + 50+ LLMs + optional sandboxed cloud workers** — same posture we hold
+  (provider-neutral, local-first, cloud optional).
+
+**Where we differ / our moat — NOT self-hosting (they have it too).** The naïve
+wedge ("they're SaaS, we're self-hosted") is **dead**: verified against the repo + a
+live Helm chart, OpenWork self-hosts its whole Den control plane, keeps traffic on
+the customer's infra, and even documents a no-egress path. Our real, defensible
+differences are three:
+- **License purity.** OpenHarness is **MIT everywhere, including the governance
+  layer**. OpenWork's *entire* Den/org layer is **FSL-1.1-MIT Fair Source** —
+  source-available, non-compete-restricted, MIT only 2 years later. For the buyer
+  who wants to *own it end to end* with no asterisk on the exact part that matters
+  (governance), that gap is real and permanent-by-design on our side.
+- **Verifiable governance = enforcement, not administration.** Signed/pinned
+  definition bundles + **integrity-refusal on tamper**, **hash-chained audit anchored
+  server-side**, and a gateway that re-decides policy **server-side** with a
+  **no-token-passthrough DPoP credential broker** (agents never see raw secrets).
+  OpenWork's Den *administers* (RBAC, provisioning, desktop policies — a preference a
+  patched client can ignore); we make the config cryptographically un-forgeable and
+  the boundary hold even against a hostile endpoint. No visible OpenWork equivalent
+  for signed distribution or tamper-evident audit (see Diligence).
+- **White-label as an output.** `openharness build` → the company's *own* branded,
+  signed app; OpenWork distributes OpenWork.
+
+**Anti-lesson (what NOT to copy):** the **Fair-Source open-core split** — the whole
+governance/control-plane layer under FSL-1.1 in `/ee` while the thin engine stays
+MIT ("open core, source-available control plane, MIT someday"). Our bet is the
+opposite — **the governance layer IS the open (MIT) core**, not a source-available
+upsell a competitor can't touch for two years. (Their *self-hosting* is genuinely
+good and worth copying — it is **not** the anti-lesson; the license carve-out on the
+valuable layer is.)
+
+**Diligence (updated 2026-07-18, post-verification):** full-stack self-hosting of the
+Den control plane is **CONFIRMED** (repo docs + live GHCR Helm chart + no-egress
+config) — don't repeat the "SaaS-only" claim. Still **unverified**: whether OpenWork
+has *any* signed/pinned distribution or tamper-evident audit (we infer absence from
+public docs — confirm against the `/ee` tree before any outward claim), and whether
+the hosted-Cloud MCP path ever sees raw BYO keys (BYO-key ≠ no-passthrough).
+
+### References (OpenWork)
+
+- GitHub — https://github.com/different-ai/openwork
+- Product site — https://openworklabs.com
+- Remote MCP — `https://api.openworklabs.com/mcp/agent`
+- Launch post — https://www.linkedin.com/posts/hiltch_today-we-are-launching-openwork-an-open-source-activity-7417259068232392704-HZXf
+
+## 15. Related work: CodeNomad — a desktop-cockpit reference (2026-07-17)
+
+[CodeNomad](https://github.com/NeuralNomadsAI/CodeNomad) (Neural Nomads AI, MIT,
+**Electron + Tauri** builds, **SolidJS** frontend, Node 18+) is "**the command
+center that puts AI coding on steroids**" — its own tagline is sharper: "**OpenCode
+gives you the engine. CodeNomad gives you the cockpit.**" It is a cross-platform
+desktop workspace that **wraps the OpenCode CLI** (a required dependency) and turns
+it into a **multi-instance** command center: several OpenCode instances side by
+side, **per-instance tabs**, deep **sub-session/task awareness**, **git worktree**
+support, a **keyboard-first UI with a global command palette**, voice input,
+**SideCars** (embed local web tools — VSCode via OpenVSCode Server, a `ttyd`
+terminal — as tabs), file browser, theming, i18n. It ships as a desktop app
+(mac/win/linux) **and a server mode** accessible from a browser for remote
+development (password-gated on first launch, env/`auth.json` config, **self-signed
+HTTPS** by default). MCP/skills aren't called out in its docs — because the **engine
+(OpenCode) provides them**; CodeNomad is the cockpit over that engine.
+
+**Category note (like §12 Odysseus, not §14 OpenWork).** CodeNomad is **not** the
+same product category we are — it is a **single-user desktop cockpit for a coding
+CLI**, with (per its docs) **no org/governance layer**: no policy-at-the-tool-seam,
+no external-call audit, no signed/pinned definition distribution, no credential
+broker, no RBAC/teams. It is best read as **(a)** a **UX reference for our desktop
+surface** and **(b)** an example of a harness *shape a company could build on
+OpenHarness* — not a competitor to the governed substrate. The convergence that
+matters: **a Tauri desktop app built as a cockpit over a minimal TS coding engine
+(OpenCode ↔ our Pi fork)** — the same skeleton as `apps/desktop`.
+
+**What to borrow (desktop UX — the strongest ideas):**
+- **Multi-instance / parallel sessions** with per-instance tabs and sub-session/task
+  awareness — the pattern to study if our desktop grows past single-chat.
+- **Git-worktree integration in the GUI** — surfaces isolated workspaces the way our
+  `using-git-worktrees` flow does at the CLI.
+- **SideCars** — embedding VSCode/`ttyd` as first-class tabs is a clean way to
+  compose tools into the workspace without bloating the core.
+- **Command palette + keyboard-first polish** — cheap, high-signal desktop quality.
+
+**Anti-lesson (what NOT to copy) — the remote-access security model.** CodeNomad's
+server mode exposes the workspace over a browser with **a password + self-signed
+HTTPS**. That is precisely the ungoverned remote surface our **gateway hardening**
+exists to replace: DPoP-authenticated, request-bound, no token passthrough, pinned
+server pubkey, TLS-off-loopback required, authoritative audit. If we ever add a
+browser/remote surface to our desktop, it must inherit the gateway's trust model,
+**not** password + self-signed TLS.
+
+**Diligence:** "no MCP/skills/governance" is inferred from CodeNomad's own docs; it
+**inherits** OpenCode's MCP/skills through the engine, so don't claim it "can't do
+MCP." Verify the engine boundary before any outward comparison.
+
+### References (CodeNomad)
+
+- GitHub — https://github.com/NeuralNomadsAI/CodeNomad
+- Directory listing — https://yetanotherorchestrator.app/apps/codenomad/
