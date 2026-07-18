@@ -15,6 +15,7 @@ import {
   type GatewayHttpServer,
 } from "@openharness/gateway";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { McpConnection, McpToolInfo } from "@openharness/mcp";
 import { loadGatewayTools, type GatewayAuth } from "./gateway-bridge.ts";
 
 /** Invoke a bridged tool — the bridge reads only (toolCallId, params). */
@@ -130,6 +131,44 @@ test("pin enforced: a gateway not proving the pinned pubkey is refused (fake gat
   const impostorPin = generateAuthKeypair().publicKey;
   const badConfig: HarnessGatewayConfig = { ...config, pubkey: impostorPin };
   await expect(loadGatewayTools(badConfig, auth)).rejects.toThrow();
+});
+
+test("skips a gateway-served tool whose name is unsafe (an untrusted name can't poison the Pi tool list)", async () => {
+  // Same guard the local MCP loader applies (isSafeMcpToolName): a gateway is an
+  // untrusted upstream too. tools:[] takes the served catalog as-is, so an unsafe
+  // name reaches the safety guard rather than being filtered by the allowlist.
+  const gatewayKeys = generateAuthKeypair();
+  const client = generateAuthKeypair();
+  const token = mintGatewayToken(CLAIMS, gatewayKeys.privateKey, client.publicKey, { ttlMs: 60_000, now: Date.now() });
+  const auth: GatewayAuth = { token, clientPublicKey: client.publicKey, clientPrivateKey: client.privateKey };
+  const config: HarnessGatewayConfig = { url: "https://gw.acme.internal/mcp", pubkey: gatewayKeys.publicKey, tools: [] };
+
+  const served: McpToolInfo[] = [
+    { name: "safe_tool" },
+    { name: "slash/name" }, // non-[A-Za-z0-9_.-] char -> unsafe
+    { name: "has space" }, // whitespace -> unsafe
+    { name: "x".repeat(101) }, // over the length cap -> unsafe
+  ];
+  const logs: string[] = [];
+  const fakeConn: McpConnection = {
+    listTools: async () => served,
+    callTool: async () => ({ content: [] }),
+    close: async () => {},
+  };
+
+  const { tools, dispose } = await loadGatewayTools(config, auth, {
+    connect: async () => fakeConn,
+    logger: (m) => logs.push(m),
+  });
+  try {
+    // Only the safe tool is bridged; the three hostile names are dropped.
+    expect(tools.map((t) => t.name)).toEqual(["mcp__gateway__safe_tool"]);
+    expect(tools.some((t) => t.name.includes("slash/name"))).toBe(false);
+    // The skip is logged (observability), not silent.
+    expect(logs.some((m) => m.includes("unsafe"))).toBe(true);
+  } finally {
+    await dispose();
+  }
 });
 
 test("fail-closed: a declared gateway that cannot be reached throws (offline hard-fail)", async () => {

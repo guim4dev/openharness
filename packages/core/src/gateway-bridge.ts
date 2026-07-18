@@ -1,7 +1,7 @@
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { HarnessGatewayConfig } from "@openharness/definition";
 import { createDpopFetch } from "@openharness/gateway";
-import { connectGatewayServer, mcpToolToPiTool } from "@openharness/mcp";
+import { connectGatewayServer, isSafeMcpToolName, mcpToolToPiTool } from "@openharness/mcp";
 import type { GatewayFetch, McpConnection } from "@openharness/mcp";
 
 /**
@@ -21,6 +21,8 @@ export interface LoadGatewayToolsOptions {
   namespace?: string;
   /** Test seam: override the connection (defaults to a DPoP HTTP connection). */
   connect?: (url: string, fetchImpl: GatewayFetch) => Promise<McpConnection>;
+  /** Where non-fatal warnings go (e.g. an unsafe tool name skipped). Default: console.warn. */
+  logger?: (message: string) => void;
 }
 
 export interface LoadGatewayToolsResult {
@@ -52,6 +54,7 @@ export async function loadGatewayTools(
 ): Promise<LoadGatewayToolsResult> {
   const namespace = options.namespace ?? "gateway";
   const connect = options.connect ?? connectGatewayServer;
+  const log = options.logger ?? ((m: string) => console.warn(m));
   // Refuse to send credentials over plaintext to a non-loopback host — TLS is
   // what keeps a network observer from reading the token + proof at all.
   requireSecureUrl(gateway.url);
@@ -87,6 +90,16 @@ export async function loadGatewayTools(
   const tools: ToolDefinition[] = [];
   for (const mcpTool of mcpTools) {
     if (allow.length > 0 && !allow.includes(mcpTool.name)) continue;
+    // The gateway is an UNTRUSTED upstream too: a served tool name with
+    // whitespace, control/RTL chars, or absurd length, bridged verbatim, poisons
+    // the ENTIRE tool list the provider sees (400s → harness unusable) and spoofs
+    // UIs. Same guard the local MCP loader applies (isSafeMcpToolName). Skip it.
+    if (!isSafeMcpToolName(mcpTool.name)) {
+      log(
+        `[openharness/gateway] gateway '${gateway.url}' offered a tool with an unsafe name (${JSON.stringify(mcpTool.name)}) — skipping it.`,
+      );
+      continue;
+    }
     tools.push(mcpToolToPiTool(namespace, mcpTool, callTool));
   }
 

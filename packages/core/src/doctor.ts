@@ -81,6 +81,48 @@ function firstPositional(args: string[], from = 0): string | undefined {
 }
 
 /**
+ * `docker`/`podman run` flags that TAKE a value in the FOLLOWING token (short and
+ * long forms). Given as its own token (`-e FOO=bar`, `--name x`), such a flag's
+ * value is NOT the image; `--flag=value` carries its own value and consumes no
+ * following token, and boolean flags (`-i`, `-t`, `--rm`, `-d`) consume nothing.
+ * Not exhaustive of Docker's CLI, but covers the value-taking flags that realistically
+ * precede an image so its value is never mistaken for the image operand.
+ */
+const DOCKER_VALUE_FLAGS = new Set([
+  "-e", "--env", "--env-file",
+  "-v", "--volume", "--mount", "--tmpfs",
+  "-p", "--publish", "--expose",
+  "--name", "-h", "--hostname",
+  "-w", "--workdir",
+  "-u", "--user",
+  "--network", "--net", "--net-alias", "--network-alias", "--ip", "--ip6", "--dns", "--add-host",
+  "--entrypoint",
+  "-l", "--label", "--label-file",
+  "--platform", "--pull", "--restart", "--pid", "--ipc", "--uts", "--userns",
+  "-m", "--memory", "--memory-swap", "--cpus", "--cpuset-cpus", "--cpu-shares",
+  "--device", "--cap-add", "--cap-drop", "--security-opt", "--group-add",
+  "--gpus", "--runtime", "--cidfile", "--stop-signal", "--health-cmd",
+  "-a", "--attach", "--log-driver", "--log-opt", "--sysctl", "--ulimit", "--shm-size",
+]);
+
+/**
+ * The image operand of a `docker`/`podman run`: the first token after `run` that
+ * is neither a flag nor the VALUE consumed by a known value-taking flag. Parsing
+ * this correctly matters — a `firstPositional` that stops at `-e`'s value
+ * (`FOO=bar`, which does not start with `-`) would key the pin/attestation check
+ * off the FLAG VALUE and silently skip the proof for the real image.
+ */
+function dockerImageArg(args: string[]): string | undefined {
+  for (let i = args.indexOf("run") + 1; i < args.length; i++) {
+    const a = args[i];
+    if (!a.startsWith("-")) return a; // first positional operand = the image
+    if (DOCKER_VALUE_FLAGS.has(a)) i++; // this flag consumes its value token; skip it
+    // else: a boolean flag or a self-contained `--flag=value` — skip just this token
+  }
+  return undefined;
+}
+
+/**
  * A launch-time FETCH and whether its target is pinned. MCP servers are commonly
  * run through a package/container runner that re-resolves its target on each
  * launch — the Postmark-MCP class of supply-chain risk (a trusted upstream
@@ -113,13 +155,14 @@ function runnerPinStatus(command: string, args: string[]): RunnerPin | undefined
   if (base === "uv" && args[0] === "x") return pypi("uv x", firstPositional(args, 1));
   if (base === "uv" && args[0] === "tool" && args[1] === "run") return pypi("uv tool run", firstPositional(args, 2));
   if ((base === "docker" || base === "podman") && args.includes("run")) {
-    // Pinned only when some argument IS a full image reference ending in a
-    // content digest — `<name>[:tag]@sha256:<64hex>`, anchored. A digest merely
-    // CONTAINED in an unrelated arg (e.g. `-e EXPECTED=@sha256:…`, whose token
-    // carries an `=` outside the image-name charset) does NOT count — that false
-    // negative would let a mutable `:latest` image ship silently.
-    const pinned = args.some((a) => /^[a-z0-9._/:-]+@sha256:[0-9a-f]{64}$/i.test(a));
-    const image = firstPositional(args, args.indexOf("run") + 1) ?? "<image>";
+    // Resolve the actual IMAGE operand (skipping value-taking flags and their
+    // values), then judge pinning on THAT image alone. Pinned only when the image
+    // ends in a content digest — `<name>[:tag]@sha256:<64hex>`, anchored; a tag is
+    // mutable. A digest sitting in an UNRELATED arg (`-e X=@sha256:…`, a
+    // `--label`) is not the image and must NOT count — that false positive would
+    // let a mutable `:latest` image ship silently.
+    const image = dockerImageArg(args) ?? "<image>";
+    const pinned = /^[a-z0-9._/:-]+@sha256:[0-9a-f]{64}$/i.test(image);
     return { runner: base, target: image, pinned, hint: `${image.split("@")[0].split(":")[0]}@sha256:<digest>` };
   }
   return undefined;

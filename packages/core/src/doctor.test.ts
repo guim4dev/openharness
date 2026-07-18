@@ -231,6 +231,67 @@ test("the unpinned check spans npm-family, PyPI, and container runners", async (
   ).toBe(true);
 });
 
+test("docker/podman image parse: a value-taking flag before the image doesn't hijack the pin/attestation key", async () => {
+  const IMG = "ghcr.io/org/img";
+  const digestImage = `${IMG}@sha256:${"a".repeat(64)}`;
+
+  // (1) An UNPINNED image sitting behind value-taking flags (`-e FOO=bar`,
+  //     `-v /x:/y`) is still flagged, and the finding names the IMAGE — not the
+  //     `-e` value `FOO=bar` (the bug keyed the check off the flag value).
+  const unpinned = writeDef(
+    baseManifest({
+      mcp: {
+        servers: {
+          s: { transport: "stdio", command: "docker", args: ["run", "-e", "FOO=bar", "-v", "/x:/y", `${IMG}:latest`] },
+        },
+      },
+    }),
+  );
+  const rU = await runDoctor(unpinned);
+  const finding = rU.problems.find((p) => p.code === "mcp-server-unpinned");
+  expect(finding).toBeDefined();
+  expect(finding!.message).toContain(`${IMG}:latest`);
+  expect(finding!.message).not.toContain("FOO=bar");
+
+  // (2) A DIGEST-pinned image behind the same flags is NOT flagged unpinned, and
+  //     the attestation lookup keys off the IMAGE: a bundle keyed by the real
+  //     image verifies (proving run.target is the image, not `FOO=bar`, which
+  //     would have made strict fire artifact-provenance-missing).
+  const pinnedDef = writeDef(
+    baseManifest({
+      mcp: {
+        servers: {
+          s: { transport: "stdio", command: "docker", args: ["run", "-e", "FOO=bar", "-v", "/x:/y", digestImage] },
+        },
+      },
+    }),
+  );
+  expect(codes((await runDoctor(pinnedDef)).problems)).not.toContain("mcp-server-unpinned");
+
+  const { publicKey, privateKey } = provKeypair();
+  const sha256 = sha256Hex(Buffer.from(`artifact ${digestImage}`));
+  const BUILDER = "https://github.com/org/img/.github/workflows/release.yml@refs/tags/v1";
+  const envelope = signProvenance(
+    {
+      _type: "https://in-toto.io/Statement/v1",
+      subject: [{ name: digestImage, digest: { sha256 } }],
+      predicateType: "https://slsa.dev/provenance/v1",
+      predicate: { runDetails: { builder: { id: BUILDER } } },
+    },
+    privateKey,
+  );
+  const rP = await runDoctor(pinnedDef, {
+    strictSupplyChain: true,
+    attestations: {
+      trustRoot: { keys: [publicKey], allowedBuilders: [BUILDER] },
+      bundles: { [digestImage]: { sha256, envelope } },
+    },
+  });
+  expect(codes(rP.problems)).not.toContain("artifact-provenance-missing");
+  expect(codes(rP.problems)).not.toContain("artifact-provenance-failed");
+  expect(rP.ok).toBe(true);
+});
+
 test("warns when MCP servers are declared but the policy leaves mcp__* on default-allow", async () => {
   const server = { transport: "stdio" as const, command: "npx", args: ["-y", "srv@1.2.3"], tools: ["do_thing"] };
   // default allow + MCP server + NO mcp__* rule -> ungoverned egress warning.
