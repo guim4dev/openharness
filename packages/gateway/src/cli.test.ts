@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EncryptedFileSecretStore } from "@openharness/credentials";
-import { main, setUpstreamSecret } from "./cli.ts";
+import { main, parseApprovers, setUpstreamSecret } from "./cli.ts";
 
 let logs: string[];
 let errs: string[];
@@ -77,4 +77,20 @@ test("setUpstreamSecret rejects an invalid id and an empty value", async () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("parseApprovers: undefined/blank → undefined; valid JSON map → parsed", () => {
+  expect(parseApprovers(undefined)).toBeUndefined();
+  expect(parseApprovers("   ")).toBeUndefined();
+  expect(parseApprovers('{"alice@acme.com":"tok-a","boss@acme.com":"tok-b"}')).toEqual({
+    "alice@acme.com": "tok-a",
+    "boss@acme.com": "tok-b",
+  });
+});
+
+test("parseApprovers FAILS CLOSED on malformed input (never silently drops dual control)", () => {
+  expect(() => parseApprovers("not json")).toThrow(/OPENHARNESS_GATEWAY_APPROVERS/);
+  expect(() => parseApprovers("[1,2,3]")).toThrow(/JSON object/); // array, not an object
+  expect(() => parseApprovers("null")).toThrow(/JSON object/);
+  expect(() => parseApprovers('{"alice":123}')).toThrow(/string token/); // non-string value
 });

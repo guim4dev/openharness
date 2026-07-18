@@ -386,6 +386,7 @@ printf 'ghp_your_org_token' | npm run gateway -- set-secret github --secrets "$O
 | env var | used by | purpose |
 |---|---|---|
 | `OPENHARNESS_GATEWAY_ADMIN_TOKEN` | `serve` | Out-of-band admin bearer for the approval surface. When set, `GET/POST <adminPath>/approvals` mount so a policy `ask` is answerable over HTTP. Resolves to approver identity `"admin"`. Never in the config. |
+| `OPENHARNESS_GATEWAY_APPROVERS` | `serve` | Per-approver tokens for real dual control — a JSON object `{ "approver-identity": "token", … }`. Enables `approval.requireSecondPerson`. Malformed JSON fails the boot closed. Never in the config. |
 | `OPENHARNESS_GATEWAY_SECRETS` | `serve`, `set-secret` | Overrides the encrypted secret-store directory (below `--secrets`, above the config-adjacent default). |
 
 ### Per-approver tokens (`approvers`)
@@ -396,14 +397,22 @@ token; the approval surface authenticates the approver by their token and uses
 that **identity** as the `by` on the resolution — so an approver can't self-approve
 and the identity can't be spoofed via the request body.
 
-The `approvers` map (identity -> token) is passed to `startGatewayFromConfig`
-by the deployment, sourced from **its own env / secret store, never the config
-file**. The CLI's `serve` wires only `adminToken` from the environment; a
-deployment that needs `requireSecondPerson` embeds `startGatewayFromConfig`
-(see [`packages/gateway/src/serve.ts`](../packages/gateway/src/serve.ts)) and
-supplies `approvers` there. Approver names should match the requester principal
-shape (e.g. an email / IdP `sub`) so self-approval is detected. Empty approver
-tokens are rejected at boot (an empty bearer would authenticate any caller).
+Provide them via **`OPENHARNESS_GATEWAY_APPROVERS`** — a JSON object mapping each
+approver identity to a bearer token, read by `serve` from the environment (never
+the config file):
+
+```bash
+export OPENHARNESS_GATEWAY_APPROVERS='{"alice@acme.com":"tok-a","boss@acme.com":"tok-b"}'
+npm run gateway -- serve "$OH/gw/config.json"   # with approval.requireSecondPerson: true
+```
+
+Malformed JSON (or a non-`{string: string}` shape) **fails the boot closed** — a
+deployer who sets it expecting dual control never has it silently dropped.
+Approver names should match the requester principal shape (e.g. an email / IdP
+`sub`) so self-approval is detected. Empty approver tokens are rejected at boot
+(an empty bearer would authenticate any caller). A deployment embedding
+`startGatewayFromConfig` directly can also pass the `approvers` map
+programmatically ([`packages/gateway/src/serve.ts`](../packages/gateway/src/serve.ts)).
 
 ---
 

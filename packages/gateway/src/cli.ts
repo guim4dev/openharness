@@ -62,6 +62,33 @@ function secretsDirFor(argv: string[], configDefault?: string): string {
   return configDefault ?? resolve("secrets");
 }
 
+/**
+ * Parse the per-approver token map from `OPENHARNESS_GATEWAY_APPROVERS` — a JSON
+ * object of approver identity -> bearer token. Real dual control
+ * (`approval.requireSecondPerson`) needs this: the single shared admin token
+ * resolves to identity "admin", which can't be a distinct second person. Malformed
+ * JSON or a non-`{string: string}` shape THROWS (fail closed) — a deployer who
+ * sets it expecting dual control must not have it silently dropped. (Empty tokens
+ * are rejected downstream at boot.)
+ */
+export function parseApprovers(raw: string | undefined): Record<string, string> | undefined {
+  if (raw === undefined || raw.trim() === "") return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('OPENHARNESS_GATEWAY_APPROVERS must be a JSON object of { "approver-identity": "token" }');
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
+    throw new Error("OPENHARNESS_GATEWAY_APPROVERS must be a JSON object (approver identity -> token)");
+  const out: Record<string, string> = {};
+  for (const [id, token] of Object.entries(parsed)) {
+    if (typeof token !== "string") throw new Error(`OPENHARNESS_GATEWAY_APPROVERS['${id}'] must be a string token`);
+    out[id] = token;
+  }
+  return out;
+}
+
 /** Print help / dispatch. Returns without starting a server for non-serve commands. */
 export async function main(argv: string[]): Promise<void> {
   const [cmd] = argv;
@@ -109,9 +136,11 @@ export async function main(argv: string[]): Promise<void> {
   const secretsDir = secretsDirFor(argv, join(dirname(configPath), "secrets"));
   const secretStore = await EncryptedFileSecretStore.open(secretsDir);
   const adminToken = process.env.OPENHARNESS_GATEWAY_ADMIN_TOKEN;
+  const approvers = parseApprovers(process.env.OPENHARNESS_GATEWAY_APPROVERS);
   const server = await startGatewayFromConfig(config, {
     secretStore,
     ...(adminToken ? { adminToken } : {}),
+    ...(approvers ? { approvers } : {}),
   });
   console.log(`[openharness-gateway] listening at ${server.url}`);
 
