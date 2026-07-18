@@ -177,7 +177,9 @@ The gateway runs the governed pipeline as an MCP server: a pinned tool catalog,
 server-side policy, DPoP-authenticated requests (no token passthrough), a
 credential broker that resolves the org secret **after** the policy decision,
 and an authoritative audit log. The org's per-upstream credential lives in an
-encrypted store beside the config — never in the config file.
+encrypted store beside the config — never in the config file. (This section is
+the hands-on flow; the full `serve` config schema — every key, secrets/env,
+transport, caveats — is [`GATEWAY.md`](GATEWAY.md).)
 
 ```bash
 export OH=/tmp/oh-local && mkdir -p "$OH/gw"
