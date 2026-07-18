@@ -124,7 +124,14 @@ function walk(value: unknown, redactors: CompiledRedactor[]): unknown {
   if (Array.isArray(value)) return value.map((v) => walk(v, redactors));
   if (value !== null && typeof value === "object") {
     const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = walk(v, redactors);
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      // Redact the KEY too, not just the value — a secret can appear as an object
+      // key (e.g. a map keyed by token), which would otherwise re-enter the audit
+      // log / model context unredacted. (A key that redacts to a colliding
+      // placeholder loses fidelity, but never leaks the secret — the right trade.)
+      const key = redactors.length ? redactString(k, redactors) : k;
+      out[key] = walk(v, redactors);
+    }
     return out;
   }
   return value;

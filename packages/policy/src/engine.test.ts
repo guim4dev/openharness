@@ -217,3 +217,16 @@ describe("checkModel — deny wins, allow-list gates", () => {
     expect(checkModel(p, "openai", "gpt-4o")).toBe("deny");
   });
 });
+
+test("redact scrubs a secret that appears as an object KEY, not only as a value", () => {
+  const p: Policy = {
+    default: "deny",
+    rules: [],
+    redact: [{ pattern: "sk-[a-z0-9]+", replace: "[REDACTED]" }],
+  };
+  const out = redact(p, { "sk-abc123": "v", nested: { "sk-def456": 1 } });
+  const json = JSON.stringify(out);
+  expect(json).not.toContain("sk-abc123");
+  expect(json).not.toContain("sk-def456");
+  expect(json).toContain("[REDACTED]");
+});
