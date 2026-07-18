@@ -89,3 +89,53 @@ test("refuses a skill path that escapes the definition dir (traversal), writing 
     }),
   ).rejects.toThrow(MaterializeError);
 });
+
+test("atomicity: an escaping skill path writes NOTHING (validation precedes every write)", async () => {
+  const out = join(dir, "atomic");
+  const withMandatory = { ...manifest, skills: [{ path: "skills/triage", mandatory: true }] };
+  await expect(
+    writeHarnessDefinition(out, {
+      manifest: withMandatory,
+      systemPrompt: "hi",
+      skills: [
+        { path: "skills/triage", content: "---\nname: triage\ndescription: x\n---\nok" },
+        { path: "../../evil", content: "pwned" }, // escapes → must abort before any write
+      ],
+    }),
+  ).rejects.toThrow(MaterializeError);
+  // No half-written, unloadable dir: base files were never written.
+  expect(() => readFileSync(join(out, "harness.json"), "utf8")).toThrow();
+  expect(() => readFileSync(join(out, "system-prompt.md"), "utf8")).toThrow();
+});
+
+test("rejects manifest fields it cannot materialize (appendSystemPrompt / promptLibrary / branding.icon)", async () => {
+  let i = 0;
+  for (const bad of [
+    { ...manifest, appendSystemPrompt: "extra.md" },
+    { ...manifest, promptLibrary: "lib" },
+    { ...manifest, branding: { ...manifest.branding, icon: "icon.png" } },
+  ]) {
+    await expect(writeHarnessDefinition(join(dir, `unsupported${i++}`), { manifest: bad, systemPrompt: "x" })).rejects.toThrow(
+      MaterializeError,
+    );
+  }
+});
+
+test("re-materializing without a policy removes a stale policy.json", async () => {
+  const out = join(dir, "restale");
+  await writeHarnessDefinition(out, { manifest, policy, systemPrompt: "hi" });
+  expect(readFileSync(join(out, "policy.json"), "utf8")).toContain("deny");
+  // Re-materialize with policy omitted → the stale enforcing file must be gone.
+  const result = await writeHarnessDefinition(out, { manifest, systemPrompt: "hi" });
+  expect(result.files).not.toContain("policy.json");
+  expect(() => readFileSync(join(out, "policy.json"), "utf8")).toThrow();
+  const def = await loadHarnessDefinition(out);
+  expect(def.policy).toBeUndefined();
+});
+
+test("serializes the VALIDATED manifest — unknown keys never reach disk", async () => {
+  const out = join(dir, "extrakeys");
+  const withExtra = { ...manifest, sneaky: "should-be-stripped" };
+  await writeHarnessDefinition(out, { manifest: withExtra, systemPrompt: "hi" });
+  expect(readFileSync(join(out, "harness.json"), "utf8")).not.toContain("sneaky");
+});

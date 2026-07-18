@@ -54,6 +54,57 @@ test("refuses a systemPrompt path that escapes the definition dir (no arbitrary 
   }
 });
 
+test("refuses a SYMLINK inside the dir that points outside (textual check is not enough)", async () => {
+  const { symlink } = await import("node:fs/promises");
+  const base = await mkdtemp(join(tmpdir(), "oh-load-symlink-"));
+  try {
+    await writeFile(join(base, "secret.txt"), "TOP-SECRET-KEY-MATERIAL");
+    const defDir = join(base, "def");
+    await mkdir(defDir, { recursive: true });
+    // A symlink INSIDE the def dir pointing at the secret outside it. `resolve()`
+    // sees "prompt.md" as textually inside the dir; only following the symlink
+    // reveals the escape.
+    await symlink(join(base, "secret.txt"), join(defDir, "prompt.md"));
+    await writeFile(
+      join(defDir, "harness.json"),
+      JSON.stringify({
+        name: "evil",
+        version: "0.1.0",
+        branding: { displayName: "Evil" },
+        systemPrompt: "prompt.md",
+        skills: [],
+        providers: { default: { provider: "anthropic", model: "claude-sonnet-5", credentialProfile: "work" } },
+      }),
+    );
+    await expect(loadHarnessDefinition(defDir)).rejects.toThrow(/following symlinks.*OUTSIDE|OUTSIDE the definition dir/);
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
+test("a systemPrompt that points at a directory surfaces a typed error (not a raw EISDIR)", async () => {
+  const base = await mkdtemp(join(tmpdir(), "oh-load-eisdir-"));
+  try {
+    const defDir = join(base, "def");
+    await mkdir(join(defDir, "aprompt"), { recursive: true }); // a DIR where a file is expected
+    await writeFile(
+      join(defDir, "harness.json"),
+      JSON.stringify({
+        name: "x",
+        version: "0.1.0",
+        branding: { displayName: "X" },
+        systemPrompt: "aprompt",
+        skills: [],
+        providers: { default: { provider: "anthropic", model: "claude-sonnet-5", credentialProfile: "work" } },
+      }),
+    );
+    await expect(loadHarnessDefinition(defDir)).rejects.toThrow(HarnessDefinitionError);
+    await expect(loadHarnessDefinition(defDir)).rejects.toThrow(/systemPrompt could not be read/);
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
 test("throws a clear error when a mandatory skill dir has no SKILL.md", async () => {
   await expect(loadHarnessDefinition(fixture("missing-skill"))).rejects.toThrow(HarnessDefinitionError);
   await expect(loadHarnessDefinition(fixture("missing-skill"))).rejects.toThrow(/SKILL\.md/);

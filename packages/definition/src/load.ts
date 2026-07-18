@@ -1,5 +1,6 @@
 import { readFile, access } from "node:fs/promises";
-import { join, resolve, sep } from "node:path";
+import { realpathSync } from "node:fs";
+import { dirname, join, resolve, sep } from "node:path";
 import { parsePolicy, PolicyError } from "@openharness/policy";
 import { loadPromptLibrary, resolvePrompt, PromptLibraryError, type PromptLibrary } from "@openharness/prompts";
 import { harnessManifestSchema } from "./schema.ts";
@@ -38,12 +39,41 @@ export async function loadHarnessDefinition(rootDir: string): Promise<HarnessDef
   // and exfiltrate any readable file into the system prompt sent to the provider.
   // (The build path had a completeness check; this makes the loader itself safe
   // for every caller. `lib:` refs are map-key lookups and never touch the FS.)
+  // The REAL (symlink-dereferenced) definition dir — the containment target.
+  // `root` itself may sit under a symlinked ancestor (e.g. /tmp -> /private/tmp
+  // on macOS), so compare against its canonical form.
+  const realRoot = realpathSync(root);
+  const withinReal = (p: string): boolean => p === realRoot || p.startsWith(realRoot + sep);
+
   const insideRoot = (value: string, fieldName: string): string => {
     const abs = resolve(root, value);
+    // 1) Textual containment — fast, and covers a path that doesn't exist yet.
     if (abs !== root && !abs.startsWith(root + sep)) {
       throw new HarnessDefinitionError(
         `${fieldName} references '${value}', which resolves OUTSIDE the definition dir — refusing to read it.`,
       );
+    }
+    // 2) Symlink containment — a symlink placed INSIDE the dir that points outside
+    // would pass the textual check and exfiltrate an arbitrary file. Follow
+    // symlinks on the deepest existing component (a not-yet-existing path is never
+    // read; its nearest existing ancestor must still be inside the real root).
+    let probe = abs;
+    for (;;) {
+      let real: string;
+      try {
+        real = realpathSync(probe);
+      } catch {
+        const parent = dirname(probe);
+        if (parent === probe) break; // hit the fs root without an existing ancestor
+        probe = parent;
+        continue;
+      }
+      if (!withinReal(real)) {
+        throw new HarnessDefinitionError(
+          `${fieldName} references '${value}', which (following symlinks) resolves OUTSIDE the definition dir — refusing to read it.`,
+        );
+      }
+      break;
     }
     return abs;
   };
@@ -82,7 +112,13 @@ export async function loadHarnessDefinition(rootDir: string): Promise<HarnessDef
     }
     const p = insideRoot(value, fieldName);
     if (!(await exists(p))) throw new HarnessDefinitionError(`${fieldName} file not found: ${p}`);
-    return readFile(p, "utf8");
+    try {
+      return await readFile(p, "utf8");
+    } catch (e) {
+      // e.g. the path is a directory (EISDIR) — surface a typed, field-named error
+      // instead of a raw fs Error that never says which field caused it.
+      throw new HarnessDefinitionError(`${fieldName} could not be read from ${p}: ${(e as Error).message}`);
+    }
   }
 
   const baseSystemPrompt = await resolvePromptField(manifest.systemPrompt, "systemPrompt");
