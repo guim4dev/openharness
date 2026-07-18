@@ -13,7 +13,13 @@ wedge is license purity + verifiable governance, NOT self-hosting).
 
 ## 0. Current state (what's actually built)
 
-On `main`, **431 tests green**, typecheck + `cargo check` green. A cross-cutting
+On `dev` (with `v0.1.0` tagged on `main`), **548 tests green**, typecheck +
+`cargo check` green. Since 0.1.0, `dev` adds the config-driven deploy-hardening
+seams (IdP token-exchange, KMS broker pool, out-of-process connector sandbox), a
+signed-definition **update channel** with a persisted anti-rollback floor (wired
+into desktop boot), **consumer OAuth accounts** (loopback PKCE + `openharness
+login`), **audit reconcile**, **per-approver dual-control**, and a fix for the
+macOS desktop launch crash. A cross-cutting
 integration test proves MCP + policy + audit compose end-to-end in one live
 session, and adversarial review passes hardened the security claims (honest
 audit-integrity framing + server-side chain verification, policy fails loud on a
@@ -36,8 +42,14 @@ final review of the MCP bridge + loader closed one more HIGH — the loader read
 any file a definition's `systemPrompt` pointed at, so an unverified definition
 could exfiltrate `../../etc/passwd` into the system prompt (now containment-checked)
 — plus untrusted-MCP-server hardening (unsafe tool names skipped, results capped,
-malformed results guarded, `__` barred from server names). Across four review
-passes, 12+ real bugs — several HIGH — were found and fixed with regression tests.
+malformed results guarded, `__` barred from server names). A fifth pass, on the
+post-0.1.0 code, closed five more: an empty-approver-token dual-control bypass
+(HIGH), an `audit reconcile` fail-OPEN on corrupt input (CRITICAL), a
+tampered-baked-bundle anti-rollback floor collapse, OAuth-endpoint HTTPS
+enforcement, and release env-sealing so a preset launch environment can't
+downgrade the desktop app to an unverified boot (HIGH). Across five review
+passes, 18+ real bugs — a CRITICAL and several HIGH — were found and fixed with
+regression tests.
 Packages/apps:
 
 - **`@openharness/definition`** — HarnessDefinition (dir + `harness.json` + optional
@@ -114,8 +126,10 @@ sandbox** (warm per-principal worker process, own memory + crash domain,
 DSSE + in-toto/SLSA, wired into `doctor`). What remains is a deployment's own
 wiring (which IdP/KMS/runtime) plus the Sigstore key-discovery for attestation.
 **Deferred:** final `tauri build` + fresh-account validation (manual); OS
-code-signing; a builder UI; cloud. (OpenConnector §13 may back the connector
-layer once mature.)
+code-signing/notarization; the deployment-specific gateway wiring (a real IdP
+JWKS, a real KMS/secrets-manager) + Sigstore key-discovery for attestation; the
+managed cloud. (The visual builder shipped as a v3-started `BuilderPanel` — see
+above; OpenConnector §13 may back the connector layer once mature.)
 
 ---
 
