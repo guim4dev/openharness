@@ -73,10 +73,79 @@ struct SidecarPaths {
     dev_harness: Option<PathBuf>,
 }
 
+/// Resolve the Node.js executable. Apps launched from Finder, Spotlight, or a
+/// DMG get launchd's bare PATH (/usr/bin:/bin:/usr/sbin:/sbin), which misses
+/// user installs (nvm, Homebrew, volta, asdf). Probe PATH first, then
+/// well-known locations; override with OH_NODE_PATH.
+fn resolve_node() -> PathBuf {
+    if let Ok(path) = std::env::var("OH_NODE_PATH") {
+        return PathBuf::from(path);
+    }
+    if let Some(paths) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&paths) {
+            let candidate = dir.join("node");
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+    }
+    let mut candidates: Vec<PathBuf> = vec![
+        "/opt/homebrew/bin/node".into(),
+        "/usr/local/bin/node".into(),
+        "/usr/bin/node".into(),
+    ];
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        // nvm: prefer the newest installed version
+        if let Ok(entries) = std::fs::read_dir(home.join(".nvm/versions/node")) {
+            let mut versions: Vec<(Vec<u32>, PathBuf)> = entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.join("bin/node").is_file())
+                .filter_map(|p| {
+                    let version = p
+                        .file_name()?
+                        .to_str()?
+                        .trim_start_matches('v')
+                        .split('.')
+                        .map(|n| n.parse::<u32>().unwrap_or(0))
+                        .collect::<Vec<u32>>();
+                    Some((version, p))
+                })
+                .collect();
+            versions.sort();
+            if let Some((_, newest)) = versions.pop() {
+                candidates.push(newest.join("bin/node"));
+            }
+        }
+        candidates.push(home.join(".volta/bin/node"));
+        candidates.push(home.join(".asdf/shims/node"));
+    }
+    candidates
+        .into_iter()
+        .find(|p| p.is_file())
+        .unwrap_or_else(|| PathBuf::from("node"))
+}
+
+/// Prepend the common Node install dirs to PATH for the child, so a `node` that
+/// itself shells out (or a resolved absolute `node`) still finds its neighbors
+/// even under the minimal GUI PATH. Complements `resolve_node()` (which finds the
+/// node BINARY): this fixes up the child's PATH for node's own subprocess lookups.
+fn augmented_path() -> String {
+    let existing = std::env::var("PATH").unwrap_or_default();
+    let extra = "/opt/homebrew/bin:/usr/local/bin:/usr/bin";
+    if existing.is_empty() {
+        extra.to_string()
+    } else {
+        format!("{extra}:{existing}")
+    }
+}
+
 /// Spawn the Node sidecar. Cross-platform: invokes the real `node` binary
 /// (not a shell shim), so no `cmd /C` / `.cmd` handling is needed. A `.ts`
 /// entry is run through the `tsx` loader (dev); a prebuilt `.mjs`/`.js` runs on
 /// bare `node` (release). Every default is overridable via env:
+///   OH_NODE_PATH      explicit node binary (default: probe PATH, then
+///                     Homebrew / /usr/local, then nvm/volta/asdf locations)
 ///   OH_SIDECAR_ENTRY    sidecar entry (default: dev .ts source / release server.mjs)
 ///   OH_HARNESS_PATH     dev-boot harness dir (debug default: harnesses/example)
 ///   OH_BUNDLE_PATH      signed bundle for verified boot (release default: resources)
@@ -89,42 +158,6 @@ struct SidecarPaths {
 ///                       their own templated identifier) get isolated config dirs instead
 ///                       of falling back to the shared default (see
 ///                       `packages/core/src/paths.ts::configDir`).
-/// Resolve the `node` binary. A GUI app launched from Finder/launchd inherits a
-/// MINIMAL PATH (`/usr/bin:/bin:/usr/sbin:/sbin`) that does NOT include Homebrew
-/// (`/opt/homebrew/bin`), `/usr/local/bin`, or an nvm dir — so a bare `node`
-/// often isn't found and the sidecar can't spawn. Honor an explicit override,
-/// then probe the common install locations, then fall back to bare `node` (which
-/// works when launched from a terminal that has node on PATH).
-fn resolve_node() -> PathBuf {
-    if let Some(explicit) = std::env::var_os("OH_NODE_BIN") {
-        return PathBuf::from(explicit);
-    }
-    for c in [
-        "/opt/homebrew/bin/node",
-        "/usr/local/bin/node",
-        "/usr/bin/node",
-    ] {
-        let p = PathBuf::from(c);
-        if p.exists() {
-            return p;
-        }
-    }
-    PathBuf::from("node")
-}
-
-/// Prepend the common Node install dirs to PATH for the child, so a `node` that
-/// itself shells out (or a resolved absolute `node`) still finds its neighbors
-/// even under the minimal GUI PATH.
-fn augmented_path() -> String {
-    let existing = std::env::var("PATH").unwrap_or_default();
-    let extra = "/opt/homebrew/bin:/usr/local/bin:/usr/bin";
-    if existing.is_empty() {
-        extra.to_string()
-    } else {
-        format!("{extra}:{existing}")
-    }
-}
-
 fn spawn_sidecar(app_id: &str, paths: &SidecarPaths) -> std::io::Result<Child> {
     let entry = std::env::var("OH_SIDECAR_ENTRY")
         .map(PathBuf::from)
@@ -243,7 +276,15 @@ fn main() {
         };
         #[cfg(not(debug_assertions))]
         let paths = {
-            let res = app.path().resource_dir()?;
+            // Resolve the bundled Resources dir from the exe path directly
+            // instead of `app.path().resource_dir()`: tauri's resolver refuses
+            // to run when any ancestor of the exe path is a symlink (e.g.
+            // /tmp -> /private/tmp on macOS), which crashed the app at launch
+            // from temp dirs.
+            let res = std::env::current_exe()?
+                .parent()
+                .ok_or("failed to resolve the exe directory")?
+                .join("../Resources");
             SidecarPaths {
                 default_entry: res.join("server.mjs"),
                 verified: Some((res.join("harness.ohbundle"), res.join("org.pub"))),
@@ -289,7 +330,7 @@ fn main() {
             }
             Err(e) => {
                 eprintln!(
-                    "[openharness] failed to spawn Node sidecar ({e}); starting disconnected. Is `node` installed? Set OH_NODE_BIN to its path to override."
+                    "[openharness] failed to spawn Node sidecar ({e}); starting disconnected. Is `node` installed? Set OH_NODE_PATH to its path to override."
                 );
                 app.manage(Sidecar(Mutex::new(None)));
                 None
