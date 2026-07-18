@@ -19,6 +19,14 @@ export interface LoadMcpToolsOptions {
   resolveSecret?: SecretResolver;
 }
 
+/**
+ * Cap on how many tools a SINGLE (untrusted) server may contribute. An arbitrarily
+ * long tool list bridged verbatim floods the provider's tool list (token cost,
+ * 400s) — cap it and log the truncation. Kept modest but well above any realistic
+ * server's tool count.
+ */
+export const MAX_TOOLS_PER_SERVER = 256;
+
 export interface LoadMcpToolsResult {
   tools: ToolDefinition[];
   /** Closes every open MCP connection. Safe to call more than once. */
@@ -85,6 +93,9 @@ export async function loadMcpTools(
 
     const allow = spec.tools;
     const callTool = conn.callTool.bind(conn);
+    const seen = new Set<string>();
+    let bridged = 0;
+    let capped = false;
     for (const mcpTool of mcpTools) {
       if (allow && !allow.includes(mcpTool.name)) continue;
       // An untrusted server could return a tool name with whitespace, control/
@@ -96,7 +107,28 @@ export async function loadMcpTools(
         );
         continue;
       }
+      // Dedup by name (first wins): a duplicate would bridge to an identical
+      // `mcp__<server>__<name>` Pi tool, colliding in the provider's tool list.
+      if (seen.has(mcpTool.name)) {
+        log(
+          `[openharness/mcp] server '${serverName}' offered a duplicate tool name (${JSON.stringify(mcpTool.name)}) — skipping the repeat.`,
+        );
+        continue;
+      }
+      // Cap how many tools one server may contribute (an over-long list floods the
+      // provider's tool list). Log once and stop bridging further tools.
+      if (bridged >= MAX_TOOLS_PER_SERVER) {
+        capped = true;
+        break;
+      }
+      seen.add(mcpTool.name);
       tools.push(mcpToolToPiTool(serverName, mcpTool, callTool));
+      bridged++;
+    }
+    if (capped) {
+      log(
+        `[openharness/mcp] server '${serverName}' offered more tools than the per-server cap (${MAX_TOOLS_PER_SERVER}) — truncated the extra tools.`,
+      );
     }
   }
 

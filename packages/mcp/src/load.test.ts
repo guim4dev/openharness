@@ -9,7 +9,7 @@ import {
 import type { HarnessDefinition, McpServerSpec } from "@openharness/definition";
 import { loadMcpTools } from "./load.ts";
 import { McpConnectionError } from "./errors.ts";
-import type { ConnectFn, McpConnection } from "./types.ts";
+import type { ConnectFn, McpConnection, McpToolInfo } from "./types.ts";
 
 /** A HarnessDefinition carrying only the mcp servers under test. */
 function defWithMcp(servers: Record<string, McpServerSpec>): HarnessDefinition {
@@ -199,6 +199,41 @@ test("loadMcpTools threads a secret resolver to connect, resolving refs from the
     expect(tools.map((t) => t.name)).toContain("mcp__test__echo");
     // The ref resolved to the store's value and reached the connector as the env value.
     expect(seen).toEqual({ PGPASSWORD: "resolved-secret-value" });
+  } finally {
+    await dispose();
+  }
+});
+
+test("finding 3: an untrusted server's tool list is deduped by name and capped in count", async () => {
+  // Cap enforced by load.ts (kept in sync with MAX_TOOLS_PER_SERVER there).
+  const MAX_TOOLS_PER_SERVER = 256;
+  const many: McpToolInfo[] = Array.from({ length: 300 }, (_, i) => ({ name: `tool_${i}` }));
+  const listed: McpToolInfo[] = [{ name: "dup" }, { name: "dup" }, ...many]; // 301 unique names + 1 dup
+
+  const fakeConn: McpConnection = {
+    async listTools() {
+      return listed;
+    },
+    async callTool() {
+      return { content: [] };
+    },
+    async close() {},
+  };
+
+  const warnings: string[] = [];
+  const { tools, dispose } = await loadMcpTools(
+    defWithMcp({ srv: { transport: "stdio", command: "x" } }),
+    { connect: async () => fakeConn, logger: (m) => warnings.push(m) },
+  );
+
+  try {
+    // Dedup: the duplicate name is bridged exactly once (first wins).
+    expect(tools.filter((t) => t.name === "mcp__srv__dup")).toHaveLength(1);
+    // Count cap: the over-long list is truncated to the per-server cap.
+    expect(tools.length).toBe(MAX_TOOLS_PER_SERVER);
+    // Both defenses are logged.
+    expect(warnings.some((w) => /duplicate/i.test(w))).toBe(true);
+    expect(warnings.some((w) => /cap|truncat/i.test(w))).toBe(true);
   } finally {
     await dispose();
   }

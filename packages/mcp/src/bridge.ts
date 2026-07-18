@@ -22,15 +22,27 @@ export function isSafeMcpToolName(toolName: string): boolean {
   return /^[A-Za-z0-9_.-]{1,100}$/.test(toolName);
 }
 
-/** Cap on a single bridged tool result — an untrusted server must not flood the
- *  agent's context / amplify token cost / risk OOM with an unbounded blob. */
-const MAX_RESULT_CHARS = 262_144; // 256 KiB per text/serialized block
+/** Cap on a single bridged content block — an untrusted server must not flood the
+ *  agent's context / amplify token cost / risk OOM with an unbounded blob. Applies
+ *  to text/serialized blocks AND to an image block's base64 `data`. */
+const MAX_RESULT_CHARS = 262_144; // 256 KiB per block
+
+/** Cap on the AGGREGATE of one tool result across ALL its blocks. The per-block
+ *  cap alone does not bound the total: a server can return an unbounded NUMBER of
+ *  in-cap blocks and still flood context / OOM. Enforced by short-circuiting the
+ *  block loop, so oversized results are never materialized in full. */
+const MAX_TOTAL_RESULT_CHARS = MAX_RESULT_CHARS * 4; // 1 MiB across all blocks
 
 const EMPTY_OBJECT_SCHEMA = { type: "object", properties: {}, required: [] } as const;
 
-/** Truncate an untrusted string block to the result cap, marking it when cut. */
+/** Truncate an untrusted string to a cap, marking it when cut. */
+function capTo(text: string, cap: number): string {
+  return text.length > cap ? `${text.slice(0, cap)}\n…[truncated by openharness: content exceeded ${cap} chars]` : text;
+}
+
+/** Truncate an untrusted string block to the per-block result cap, marking it when cut. */
 function capText(text: string): string {
-  return text.length > MAX_RESULT_CHARS ? `${text.slice(0, MAX_RESULT_CHARS)}\n…[truncated by openharness: result exceeded ${MAX_RESULT_CHARS} chars]` : text;
+  return capTo(text, MAX_RESULT_CHARS);
 }
 
 /**
@@ -76,16 +88,46 @@ export function mcpToolToPiTool(
       }
 
       const content: PiContent[] = [];
+      // Enforce BOTH a per-block cap and an aggregate cap, short-circuiting so an
+      // unbounded number (or size) of blocks from an untrusted server is never
+      // materialized in full.
+      let used = 0;
       for (const c of blocks) {
+        const remaining = MAX_TOTAL_RESULT_CHARS - used;
+        if (remaining <= 0) {
+          content.push({
+            type: "text",
+            text: `…[truncated by openharness: result exceeded the ${MAX_TOTAL_RESULT_CHARS}-char aggregate budget; remaining blocks dropped]`,
+          });
+          break;
+        }
+        // Effective cap for this block: the per-block cap, further limited by the
+        // aggregate budget still available.
+        const cap = Math.min(MAX_RESULT_CHARS, remaining);
+
         if (c && c.type === "text") {
-          content.push({ type: "text", text: capText(String((c as { text?: unknown }).text ?? "")) });
+          const raw = String((c as { text?: unknown }).text ?? "");
+          content.push({ type: "text", text: capTo(raw, cap) });
+          used += Math.min(raw.length, cap);
         } else if (c && c.type === "image") {
           const img = c as { data?: unknown; mimeType?: unknown };
-          content.push({
-            type: "image",
-            data: String(img.data ?? ""),
-            mimeType: String(img.mimeType ?? "application/octet-stream"),
-          });
+          const data = String(img.data ?? "");
+          if (data.length > cap) {
+            // A truncated base64 blob is a corrupt image that still costs the full
+            // token budget — drop it for a tiny visible marker instead.
+            content.push({
+              type: "text",
+              text: `…[image dropped by openharness: base64 data (${data.length} chars) exceeded the ${cap}-char budget]`,
+            });
+            used += cap;
+          } else {
+            content.push({
+              type: "image",
+              data,
+              mimeType: String(img.mimeType ?? "application/octet-stream"),
+            });
+            used += data.length;
+          }
         } else {
           // audio / embedded resource (or a malformed block): Pi has no matching
           // content type — stringify defensively (a circular block can't throw us).
@@ -95,7 +137,8 @@ export function mcpToolToPiTool(
           } catch {
             text = "[unserializable content block]";
           }
-          content.push({ type: "text", text: capText(text) });
+          content.push({ type: "text", text: capTo(text, cap) });
+          used += Math.min(text.length, cap);
         }
       }
 
