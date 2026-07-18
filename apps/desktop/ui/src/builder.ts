@@ -34,6 +34,13 @@ export interface BuilderMcpServer {
   url: string;
   /** Comma-separated tool allowlist; empty = expose all the server offers. */
   tools: string;
+  /**
+   * Spec fields the form does NOT edit (`args`, `env`, `secrets`, `headers`,
+   * `mandatory`, …), carried verbatim from a loaded manifest so a
+   * load→edit→save round-trip never silently drops them. Absent when there are
+   * none.
+   */
+  carry?: Record<string, unknown>;
 }
 
 export interface BuilderDraft {
@@ -153,6 +160,12 @@ function matchIsMalformed(match: string): boolean {
   return depth !== 0;
 }
 
+/**
+ * Mirror of the manifest schema's MCP server-name rule: `[A-Za-z0-9._-]` with no
+ * `__` (so the bridged-tool mapping `mcp__<server>__<tool>` stays injective).
+ */
+const MCP_SERVER_NAME = /^(?!.*__)[A-Za-z0-9._-]+$/;
+
 /** Parse a comma-separated tool allowlist into a trimmed, non-empty array. */
 function parseTools(csv: string): string[] {
   return csv
@@ -183,10 +196,16 @@ export function draftToManifest(draft: BuilderDraft): Record<string, unknown> {
     },
   };
   if (draft.mcpServers.length > 0) {
-    const servers: Record<string, unknown> = {};
+    // `Object.create(null)` (not `{}`) so a server named `__proto__` (or any
+    // reserved key) becomes a real own property instead of mutating the map's
+    // prototype and vanishing.
+    const servers: Record<string, unknown> = Object.create(null);
     for (const m of draft.mcpServers) {
       const tools = parseTools(m.tools);
       servers[m.name] = {
+        // Carried, form-unedited fields (args/env/secrets/headers/mandatory/…)
+        // first, then overlay the fields the builder OWNS so nothing is lost.
+        ...(m.carry ?? {}),
         transport: m.transport,
         ...(m.transport === "stdio" ? { command: m.command } : { url: m.url }),
         ...(tools.length > 0 ? { tools } : {}),
@@ -248,13 +267,20 @@ export function draftFromManifest(
       const path = String(s.path ?? "");
       return { path, mandatory: Boolean(s.mandatory), content: contentByPath.get(path) ?? "" };
     }),
-    mcpServers: Object.entries(mcpServers).map(([name, spec]) => ({
-      name,
-      transport: (spec.transport as McpTransport) ?? "stdio",
-      command: String(spec.command ?? ""),
-      url: String(spec.url ?? ""),
-      tools: Array.isArray(spec.tools) ? (spec.tools as string[]).join(", ") : "",
-    })),
+    mcpServers: Object.entries(mcpServers).map(([name, spec]) => {
+      // Peel off the fields the form owns; carry the rest (args/env/secrets/
+      // headers/mandatory/…) verbatim so a round-trip drops nothing.
+      const { transport, command, url, tools, ...carry } = spec;
+      const server: BuilderMcpServer = {
+        name,
+        transport: (transport as McpTransport) ?? "stdio",
+        command: String(command ?? ""),
+        url: String(url ?? ""),
+        tools: Array.isArray(tools) ? (tools as string[]).join(", ") : "",
+      };
+      if (Object.keys(carry).length > 0) server.carry = carry;
+      return server;
+    }),
     // Preserve the full original so fields the form doesn't edit (version,
     // gateway pin, extra providers, appendSystemPrompt, promptLibrary, icon)
     // survive a load→edit→save round-trip.
@@ -296,12 +322,27 @@ export function validateDraft(draft: BuilderDraft): BuilderProblem[] {
         message: `Rule ${i + 1} match '${r.match}' is malformed — a parameterized match must be name(<glob>) with balanced parentheses.`,
       });
   });
+  const seenSkillPaths = new Set<string>();
   draft.skills.forEach((s, i) => {
-    if (!s.path.trim()) problems.push({ field: `skills.${i}.path`, message: `Skill ${i + 1} needs a path.` });
+    const path = s.path.trim();
+    if (!path) problems.push({ field: `skills.${i}.path`, message: `Skill ${i + 1} needs a path.` });
+    // Two skills with the same path collapse to one <path>/SKILL.md on save,
+    // silently losing a body — mirror the duplicate-MCP-name guard.
+    else if (seenSkillPaths.has(path))
+      problems.push({ field: `skills.${i}.path`, message: `Skill path '${s.path}' is duplicated.` });
+    else seenSkillPaths.add(path);
   });
   const seen = new Set<string>();
   draft.mcpServers.forEach((m, i) => {
     if (!m.name.trim()) problems.push({ field: `mcp.${i}.name`, message: `MCP server ${i + 1} needs a name.` });
+    // Mirror the manifest schema's server-name rule: [A-Za-z0-9._-] with no
+    // `__` (which namespaces bridged tools as mcp__<server>__<tool>). Without
+    // this a name the schema rejects reports VALID here.
+    else if (!MCP_SERVER_NAME.test(m.name))
+      problems.push({
+        field: `mcp.${i}.name`,
+        message: `MCP server name '${m.name}' must be letters, digits, '.', '_', '-' and contain no '__' (it namespaces bridged tools as mcp__<server>__<tool>).`,
+      });
     else if (seen.has(m.name)) problems.push({ field: `mcp.${i}.name`, message: `MCP server name '${m.name}' is duplicated.` });
     else seen.add(m.name);
     if (m.transport === "stdio") req(m.command, `mcp.${i}.command`, `MCP server ${i + 1} command`);

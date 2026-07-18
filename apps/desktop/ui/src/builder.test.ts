@@ -166,6 +166,88 @@ describe("serialization", () => {
   });
 });
 
+describe("confirmed-bug regressions", () => {
+  // #1 — round-trip loss: env/secrets/args/headers/mandatory were dropped by the
+  // builder<->manifest mapping (builder.ts serialize + draftFromManifest).
+  test("round-trips ALL MCP server fields (env, secrets, args, headers, mandatory) without loss", () => {
+    const draft: BuilderDraft = {
+      ...filled,
+      mcpServers: [
+        {
+          name: "github",
+          transport: "stdio",
+          command: "npx",
+          url: "",
+          tools: "list_issues, create_issue",
+          carry: {
+            args: ["-y", "@modelcontextprotocol/server-github"],
+            env: { GITHUB_HOST: "github.com" },
+            secrets: { GITHUB_TOKEN: "github-pat" },
+            headers: { "X-Trace": "on" },
+            mandatory: true,
+          },
+        },
+      ],
+    };
+    const manifest = draftToManifest(draft);
+    const servers = (manifest.mcp as { servers: Record<string, Record<string, unknown>> }).servers;
+    // A direct serialize keeps every field the schema allows.
+    expect(servers.github).toEqual({
+      transport: "stdio",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-github"],
+      env: { GITHUB_HOST: "github.com" },
+      secrets: { GITHUB_TOKEN: "github-pat" },
+      headers: { "X-Trace": "on" },
+      mandatory: true,
+      tools: ["list_issues", "create_issue"],
+    });
+    // Full round-trip: manifest -> draft -> manifest drops nothing.
+    const back = draftFromManifest(manifest, draftToPolicy(draft), draft.systemPrompt, draftToSkillContents(draft));
+    expect(draftToManifest(back)).toEqual(manifest);
+  });
+
+  // #2 — validation gap: a name with `__` produced a harness.json the schema rejects
+  // while the builder reported VALID.
+  test("flags an MCP server name containing '__' (which the manifest schema rejects)", () => {
+    const d: BuilderDraft = {
+      ...filled,
+      mcpServers: [{ name: "a__b", transport: "stdio", command: "npx", url: "", tools: "" }],
+    };
+    expect(validateDraft(d).some((p) => p.field === "mcp.0.name" && /__/.test(p.message))).toBe(true);
+    expect(draftIsValid(d)).toBe(false);
+  });
+
+  // #3 — prototype assignment: a `__proto__` server was swallowed by the prototype
+  // instead of becoming a manifest key.
+  test("an MCP server named '__proto__' is a validation error and never silently vanishes", () => {
+    const d: BuilderDraft = {
+      ...filled,
+      mcpServers: [{ name: "__proto__", transport: "stdio", command: "npx", url: "", tools: "" }],
+    };
+    // (a) It is a validation error...
+    expect(draftIsValid(d)).toBe(false);
+    // (b) ...and even when serialized it appears as a real own key — the prototype
+    // is not polluted, so the server does not vanish.
+    const servers = (draftToManifest(d).mcp as { servers: Record<string, unknown> }).servers;
+    expect(Object.prototype.hasOwnProperty.call(servers, "__proto__")).toBe(true);
+    expect(Object.getPrototypeOf(servers)).toBe(null);
+  });
+
+  // #4 — duplicate skill paths silently collapse to one SKILL.md, losing a body.
+  test("flags two skills sharing the same path (they would collapse to one SKILL.md)", () => {
+    const d: BuilderDraft = {
+      ...filled,
+      skills: [
+        { path: "skills/triage", mandatory: true, content: "# A\n" },
+        { path: "skills/triage", mandatory: false, content: "# B\n" },
+      ],
+    };
+    expect(validateDraft(d).some((p) => p.field === "skills.1.path" && /duplicated/.test(p.message))).toBe(true);
+    expect(draftIsValid(d)).toBe(false);
+  });
+});
+
 describe("validateDraft", () => {
   test("a fully-filled draft is valid", () => {
     expect(validateDraft(filled)).toEqual([]);
