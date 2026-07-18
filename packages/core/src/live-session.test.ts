@@ -1,7 +1,9 @@
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import {
   InMemorySecretStore,
@@ -149,5 +151,74 @@ test("rotates to the next account on a live rate-limit and still answers", async
     expect(manager.activeAccount("work", "anthropic")?.id).toBe("b");
   } finally {
     await live.close();
+  }
+});
+
+test("close() completes the final audit flush even when a teardown step (gateway dispose) throws — no orphaned steps", async () => {
+  // A tiny audit-ingest server so the final flush yields a result (onShipResult).
+  const srv = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: true, ackedSeq: -1 }));
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", () => r()));
+  const port = (srv.address() as AddressInfo).port;
+
+  // A harness that declares BOTH a gateway (whose close() we make reject) and a
+  // policy (so an audit sink + shipper exist).
+  const hdir = join(tmp, "gwharness");
+  await mkdir(hdir, { recursive: true });
+  await writeFile(join(hdir, "system-prompt.md"), "You are governed.\n");
+  await writeFile(join(hdir, "policy.json"), JSON.stringify({ default: "allow", rules: [] }));
+  await writeFile(
+    join(hdir, "harness.json"),
+    JSON.stringify({
+      name: "gw",
+      version: "0.1.0",
+      branding: { displayName: "GW" },
+      systemPrompt: "system-prompt.md",
+      skills: [],
+      providers: { default: { provider: "anthropic", model: "claude-sonnet-5", credentialProfile: "work" } },
+      gateway: { url: `http://127.0.0.1:${port}/mcp`, pubkey: "-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----", tools: [] },
+    }),
+  );
+
+  const { store, manager, registry } = buildCredentials();
+  await store.set("api-key:a", "key-a");
+  const onShipResult = vi.fn();
+
+  const live = await createLiveSession({
+    harnessPath: hdir,
+    manager,
+    registry,
+    profile: "work",
+    cwd: tmp,
+    agentDir: join(tmp, "agent"),
+    noExtensions: true,
+    modelRegistryOverride: createStubModelRegistry({ provider: "anthropic", modelId: "claude-sonnet-5", reply: "x" }),
+    auditPath: join(tmp, "audit.jsonl"),
+    auditServer: { url: `http://127.0.0.1:${port}`, source: "s", onShipResult },
+    // Presence-checked (fail-closed) but unused here — connect is stubbed below.
+    gatewayAuth: { token: "t", clientPublicKey: "p", clientPrivateKey: "k" },
+    // The gateway "connects" (listTools succeeds) but its close() rejects — the
+    // exact teardown-failure that previously aborted the rest of close().
+    gatewayOptions: {
+      connect: async () =>
+        ({
+          listTools: async () => [],
+          callTool: async () => ({ content: [] }),
+          close: async () => {
+            throw new Error("gateway transport already gone");
+          },
+        }) as never,
+    },
+  });
+
+  try {
+    // The gateway dispose rejects, so close() surfaces that error — but ONLY after
+    // running the remaining teardown (the final flush still fires onShipResult).
+    await expect(live.close()).rejects.toThrow(/already gone/);
+    expect(onShipResult).toHaveBeenCalled();
+  } finally {
+    await new Promise<void>((r) => srv.close(() => r()));
   }
 });

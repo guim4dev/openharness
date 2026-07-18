@@ -233,6 +233,10 @@ export async function createLiveSession(opts: CreateLiveSessionOptions): Promise
   // (fork/re-chain) is surfaced via onShipResult (default: a loud console.error).
   let auditShipper: AuditShipper | undefined;
   let shipTimer: ReturnType<typeof setInterval> | undefined;
+  // A serial flush (set when shipping is active) so the periodic timer and close()
+  // never flush concurrently; `flushChain` is the tail of the in-flight flush.
+  let flushSerial: (() => Promise<ShipResult>) | undefined;
+  let flushChain: Promise<unknown> = Promise.resolve();
   if (auditSink && opts.auditPath && opts.auditServer) {
     const as = opts.auditServer;
     auditShipper = createAuditShipper({
@@ -245,9 +249,19 @@ export async function createLiveSession(opts: CreateLiveSessionOptions): Promise
       ((r: ShipResult) => {
         if (r.conflict) console.error(`[openharness/audit] integrity ALARM shipping to ${as.url}: ${r.conflict}`);
       });
+    // Serialize flushes: the periodic timer and close()'s final flush must never
+    // run concurrently against the same log / ack-state. Each flush chains after
+    // any in-flight one.
+    flushSerial = (): Promise<ShipResult> => {
+      const run = flushChain.then(() => auditShipper!.flush());
+      flushChain = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      return run;
+    };
     const flush = (): void => {
-      void auditShipper!
-        .flush()
+      void flushSerial!()
         .then(onResult)
         .catch(() => {
           /* transport hiccup: the next flush (or close) retries from the ack */
@@ -426,16 +440,31 @@ export async function createLiveSession(opts: CreateLiveSessionOptions): Promise
       onEvent({ type: "done", text: session.getLastAssistantText() ?? streamed.join("") });
     },
     async close() {
-      if (session.isStreaming) await session.abort();
-      session.dispose();
-      await disposeMcp();
-      await disposeGateway();
-      // Stop the periodic shipper and ship one final time so the session's tail
-      // reaches the anchor. Never let a ship error mask a clean close.
-      if (shipTimer) clearInterval(shipTimer);
-      if (auditShipper) {
+      // Per-step fault isolation: one failing teardown step must NEVER orphan the
+      // others (MCP subprocesses, the gateway connection, the audit sink's file
+      // handle). Each step is guarded; the first error is re-thrown at the very
+      // end, after every resource has been released.
+      let firstErr: unknown;
+      const step = async (fn: () => unknown | Promise<unknown>): Promise<void> => {
         try {
-          const r = await auditShipper.flush();
+          await fn();
+        } catch (e) {
+          if (firstErr === undefined) firstErr = e;
+        }
+      };
+      await step(async () => {
+        if (session.isStreaming) await session.abort();
+      });
+      await step(() => session.dispose());
+      await step(() => disposeMcp());
+      await step(() => disposeGateway());
+      // Stop the periodic shipper and ship one final time (serialized with any
+      // in-flight periodic flush) so the session's tail reaches the anchor. Never
+      // let a ship error mask a clean close.
+      if (shipTimer) clearInterval(shipTimer);
+      if (auditShipper && flushSerial) {
+        try {
+          const r = await flushSerial();
           opts.auditServer?.onShipResult?.(r);
           if (r.conflict && !opts.auditServer?.onShipResult)
             console.error(`[openharness/audit] integrity ALARM shipping to ${opts.auditServer?.url}: ${r.conflict}`);
@@ -443,7 +472,10 @@ export async function createLiveSession(opts: CreateLiveSessionOptions): Promise
           /* best-effort final ship */
         }
       }
-      await auditSink?.close?.();
+      await step(async () => {
+        await auditSink?.close?.();
+      });
+      if (firstErr !== undefined) throw firstErr;
     },
   };
 }
