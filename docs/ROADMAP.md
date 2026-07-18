@@ -102,8 +102,11 @@ party, and the employee's machine never sees the secret.
 > ([`specs/2026-07-16-gateway-deploy-hardening-design.md`](specs/2026-07-16-gateway-deploy-hardening-design.md)),
 > each grounded in a mature standard: **(1) IdP token exchange** (OAuth 2.1 /
 > RFC 8693) — a `POST /token` endpoint swaps an org IdP subject token for the
-> short-lived DPoP-bound gateway token, making `sub`/`groups` IdP-asserted;
-> `IdpVerifier` is the swappable seam. **(2) KMS credential broker** —
+> short-lived DPoP-bound gateway token, making `sub`/`groups` IdP-asserted.
+> `IdpVerifier` ships in two **config-selectable** forms: a static single-key
+> (Ed25519) verifier, and a **JWKS-fetching** one (RS256/ES256 selected by `kid`,
+> `https`-only, capped-TTL cache) for real OIDC IdPs (Okta/Entra/Auth0/Google).
+> **(2) KMS credential broker** —
 > `KmsBrokerStore` over a `SecretsManager` (holds the KMS-wrapped blob) + a
 > `KmsClient` (the one audited decrypt), so the gateway keeps no long-lived
 > plaintext; shipped with an offline `LocalKms` reference (real AES-256-GCM,
@@ -112,8 +115,9 @@ party, and the employee's machine never sees the secret.
 > own memory + crash domain, egress tap inside the worker, crash containment +
 > respawn; `SandboxHost` lets a container/microVM swap behind it. Each swaps a
 > dev implementation behind an interface that already existed; the governed
-> pipeline is unchanged. **Remaining is a deployment's own choice** — wiring the
-> specific IdP JWKS, the specific KMS/secrets-manager (instance role / workload
+> pipeline is unchanged. **Remaining is a deployment's own choice** — pointing at
+> the deployment's own IdP `jwksUri` (the JWKS verifier itself is now built and
+> config-selectable), the specific KMS/secrets-manager (instance role / workload
 > identity), and the worker runtime/latency budget (the human calls in that
 > spec's §7). The connector/broker layer is behind swappable interfaces so
 > [OpenConnector](vision.md#13) can slot in as the backend once it matures.

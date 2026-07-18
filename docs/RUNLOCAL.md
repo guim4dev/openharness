@@ -274,11 +274,13 @@ connector) worker process (own memory + crash domain). The default worker runs
 under `node --experimental-strip-types`; a bundled deploy sets
 `"sandbox": { "kind": "child-process", "execArgv": [] }`.
 
-> The IdP token-exchange uses a **static-key** verifier (one configured Ed25519
-> public key); a JWKS-fetching verifier and the KMS credential broker are built
-> as provider-agnostic seams with offline references (see [`ROADMAP.md`](ROADMAP.md))
-> and wired programmatically — a real KMS is injected via the deployment's own
-> broker, so there's no dev-only KMS config selector.
+> The IdP token-exchange verifier is **config-selectable**: `tokenExchange`
+> takes either `idpPublicKey` (the static single-Ed25519-key verifier used above)
+> or **`jwksUri`** (a JWKS-fetching verifier for a real OIDC IdP — Okta/Entra/
+> Auth0/Google — that verifies RS256/ES256 keys selected by `kid`, `https`-only).
+> Exactly one is required. The KMS credential broker stays programmatic — a real
+> KMS is injected via the deployment's own broker, so there's no dev-only KMS
+> config selector.
 
 ## 6. Build a branded desktop app
 
