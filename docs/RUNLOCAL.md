@@ -297,33 +297,26 @@ npm run dev:desktop
 
 > **The packaged app needs `node` findable.** It launches a Node sidecar, and a
 > GUI app started from Finder/launchd has a MINIMAL PATH (no Homebrew/nvm). The
-> shell probes `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin` and honors
-> `OH_NODE_BIN=/path/to/node`; if `node` still isn't found it opens in a
-> "Not connected" state (rather than crashing). Running the binary from a
-> terminal — where `node` is on PATH — always works.
+> launcher resolves `node` for you — it probes PATH, then Homebrew / `/usr/local`,
+> then nvm (newest) / volta / asdf, and honors `OH_NODE_PATH=/path/to/node`. If
+> `node` still isn't found the app opens in a "Not connected" state (it degrades
+> rather than crashing). Running the binary from a terminal — where `node` is on
+> PATH — always works.
 
-> **Known issue — macOS 26 (Tahoe) intermittent launch crash.** On macOS 26 a
-> packaged app can abort *at launch* with `panic in a function that cannot
-> unwind` inside `tao::…::did_finish_launching` (SIGABRT, before any of our code
-> runs). This is an **upstream** Tauri/tao incompatibility with Tahoe
-> ([tao#1171](https://github.com/tauri-apps/tao/issues/1171)), not a bug in the
-> harness — a foreign Objective-C exception unwinds through tao's `extern "C"`
-> launch callback, so the Rust panic line is uninformative (there is no Rust
-> message). It is **intermittent** and specific to the LaunchServices path
-> (Finder / `open`), so a relaunch often succeeds. To capture the *real* reason
-> (the technique that actually diagnoses it), run under lldb and break on the
-> ObjC throw:
->
-> ```bash
-> lldb -b -o "breakpoint set -n objc_exception_throw" -o run \
->   -o "po (id)$x0" -o "expression -O -- (id)[(id)$x0 reason]" \
->   /Applications/<App>.app/Contents/MacOS/<binary>
-> ```
->
-> A `reason` mentioning `lockFocus` / `size zero` means a bad `.icns` (regenerate
-> with `cargo tauri icon`); our shipped icon set is already complete and valid.
-> There is no released tao fix yet, so pinning/bumping the dependency does not
-> help today — track the issue upstream.
+> **Fixed — the macOS launch crash.** Earlier packaged builds could abort *at
+> launch* with `panic … cannot unwind` inside `tao::…::did_finish_launching`.
+> Root cause was two of our own launch-time faults (not the upstream
+> [tao#1171](https://github.com/tauri-apps/tao/issues/1171), which was only the
+> vehicle the panic rode out on): (1) `app.path().resource_dir()` refuses when any
+> ancestor of the exe path is a **symlink** (e.g. `/tmp -> /private/tmp` on
+> macOS) — the release build now resolves `Contents/Resources` directly from
+> `std::env::current_exe()`; (2) the Node sidecar wasn't found under launchd's bare
+> PATH — now handled by the `node` resolver above. Both are fixed; the app boots
+> from any launch context (verified against a rebuilt DMG). If a
+> `did_finish_launching` abort ever recurs, capture the real reason under lldb —
+> `lldb -b -o "breakpoint set -n objc_exception_throw" -o run -o "po (id)$x0" -o
+> "expression -O -- (id)[(id)$x0 reason]" <app binary>` — and check the exe path
+> for a symlink ancestor and `node` on the launch PATH first.
 
 ## 7. Clean up
 
