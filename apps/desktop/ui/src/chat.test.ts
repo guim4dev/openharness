@@ -185,6 +185,27 @@ describe("chatReducer", () => {
     expect(state.pendingAsks).toHaveLength(0);
   });
 
+  test("error defensively clears a still-pending ask mid-stream (Finding 1)", () => {
+    let state = feed(initialChatState, { type: "token", text: "partial" });
+    state = feed(state, { type: "ask", id: "ask-err", toolName: "shell" });
+    expect(state.pendingAsks).toHaveLength(1);
+
+    // An error ends the turn; a pending approval must not survive into the next
+    // turn as a stale ask (mirror the `done` handler).
+    state = feed(state, { type: "error", message: "model unavailable" });
+    expect(state.pendingAsks).toHaveLength(0);
+    expect(state.status).toBe("idle");
+  });
+
+  test("error with no open stream still clears a pending ask (Finding 1)", () => {
+    let state = feed(initialChatState, { type: "ask", id: "ask-err2", toolName: "shell" });
+    expect(state.pendingAsks).toHaveLength(1);
+
+    state = feed(state, { type: "error", message: "could not connect" });
+    expect(state.pendingAsks).toHaveLength(0);
+    expect(state.status).toBe("idle");
+  });
+
   test("concurrent asks queue and surface one at a time (Finding 5)", () => {
     let state = feed(
       initialChatState,
@@ -260,6 +281,7 @@ class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
   onopen: (() => void) | null = null;
   onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
   onmessage: ((event: { data: string }) => void) | null = null;
   readyState = 0;
   sent: string[] = [];
@@ -280,6 +302,10 @@ class FakeWebSocket {
   }
   emit(frame: ServerMessage) {
     this.onmessage?.({ data: JSON.stringify(frame) });
+  }
+  // Simulate an abnormal socket error (sidecar crash / network blip).
+  error() {
+    this.onerror?.();
   }
 }
 
@@ -397,5 +423,55 @@ describe("useChat", () => {
     expect(result.current.pendingAsk).toBeUndefined();
     // No stale answer was sent for the cancelled ask.
     expect(socket.sent.some((s) => s.includes("ask_response"))).toBe(false);
+  });
+
+  test("an onclose mid-stream ends the turn with a connection-lost error (Finding 2)", () => {
+    const { result } = renderHook(() => useChat({ port: 4321, token: "secret" }));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.open());
+
+    act(() => result.current.send("hello"));
+    act(() => socket.emit({ type: "token", text: "partial" }));
+    // A live turn: streaming, with a dangling approval.
+    act(() => socket.emit({ type: "ask", id: "drop-ask", toolName: "shell" }));
+    expect(result.current.status).toBe("streaming");
+    expect(result.current.pendingAsk?.id).toBe("drop-ask");
+
+    // The loopback socket drops mid-stream (sidecar crash / blip).
+    act(() => socket.close());
+
+    // The turn must not hang: it terminates to idle, the ask is cleared, and a
+    // connection-lost error is surfaced.
+    expect(result.current.status).toBe("idle");
+    expect(result.current.connected).toBe(false);
+    expect(result.current.pendingAsk).toBeUndefined();
+    expect(result.current.messages.filter((m) => m.error)).toHaveLength(1);
+  });
+
+  test("an onerror mid-stream also ends the turn (Finding 2)", () => {
+    const { result } = renderHook(() => useChat({ port: 4321, token: "secret" }));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.open());
+
+    act(() => result.current.send("hi"));
+    act(() => socket.emit({ type: "token", text: "partial" }));
+    expect(result.current.status).toBe("streaming");
+
+    act(() => socket.error());
+
+    expect(result.current.status).toBe("idle");
+    expect(result.current.messages.filter((m) => m.error)).toHaveLength(1);
+  });
+
+  test("a normal close with no in-flight turn surfaces no error (Finding 2)", () => {
+    const { result } = renderHook(() => useChat({ port: 4321, token: "secret" }));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.open());
+
+    // Idle: no streaming turn. A close must not fabricate an error bubble.
+    act(() => socket.close());
+
+    expect(result.current.connected).toBe(false);
+    expect(result.current.messages.filter((m) => m.error)).toHaveLength(0);
   });
 });

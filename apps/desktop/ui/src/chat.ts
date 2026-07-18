@@ -208,10 +208,13 @@ function applyServerEvent(state: ChatState, event: ServerMessage): ChatState {
     case "error": {
       // Turn the open assistant bubble (if any) into the error, otherwise add a
       // standalone error bubble. Either way the failure is surfaced to the user.
+      // An error ends the turn, so (like `done`) clear the ask queue — a pending
+      // approval must not outlive its turn as a stale ask.
       if (last && last.role === "assistant" && last.streaming) {
         return {
           ...state,
           status: "idle",
+          pendingAsks: [],
           messages: replaceLast(state.messages, {
             ...last,
             streaming: false,
@@ -223,6 +226,7 @@ function applyServerEvent(state: ChatState, event: ServerMessage): ChatState {
       return {
         ...state,
         status: "idle",
+        pendingAsks: [],
         seq: state.seq + 1,
         messages: [
           ...state.messages,
@@ -409,6 +413,10 @@ export function useChat(connection: Connection | null): UseChat {
   const headAskIdRef = useRef<string | undefined>(undefined);
   const head = state.pendingAsks[0];
   headAskIdRef.current = head?.id;
+  // Track the live status so the socket handlers (stable across renders) can tell
+  // whether a turn is in-flight when the socket drops, without closing over `state`.
+  const statusRef = useRef<ChatStatus>(state.status);
+  statusRef.current = state.status;
 
   useEffect(() => {
     if (!connection) return;
@@ -417,8 +425,27 @@ export function useChat(connection: Connection | null): UseChat {
     const socket = new WebSocket(url);
     socketRef.current = socket;
 
+    // Distinguish an intentional teardown (unmount / reconnect) from an
+    // unexpected drop (sidecar crash / network blip), and fire the drop handler
+    // at most once even if onerror and onclose both arrive.
+    let closedByCleanup = false;
+    let dropped = false;
+    const handleDrop = () => {
+      setConnected(false);
+      if (dropped || closedByCleanup) return;
+      dropped = true;
+      // If a turn is in-flight when the socket drops, the sidecar can no longer
+      // send `done`/`error`, so end the turn ourselves — otherwise it hangs in a
+      // streaming state forever. The reducer's `error` handler flips status to
+      // idle and clears any pending ask.
+      if (statusRef.current === "streaming") {
+        dispatch({ type: "server", event: { type: "error", message: "connection to agent lost" } });
+      }
+    };
+
     socket.onopen = () => setConnected(true);
-    socket.onclose = () => setConnected(false);
+    socket.onclose = handleDrop;
+    socket.onerror = handleDrop;
     socket.onmessage = (event) => {
       try {
         const frame = JSON.parse(String(event.data)) as ServerMessage;
@@ -429,6 +456,7 @@ export function useChat(connection: Connection | null): UseChat {
     };
 
     return () => {
+      closedByCleanup = true;
       socketRef.current = null;
       socket.close();
     };
