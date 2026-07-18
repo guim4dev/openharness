@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadHarnessDefinition } from "./load.ts";
@@ -102,4 +102,17 @@ test("creates parent dirs as needed for a nested, not-yet-existing path", async 
   expect(existsSync(dir)).toBe(false);
   await scaffoldHarness(dir);
   expect(existsSync(join(dir, "harness.json"))).toBe(true);
+});
+
+test("README example commands use a dir path, not the bare manifest name", async () => {
+  // name != dir path: the copy-paste commands must point at a directory the
+  // reader actually has, not the manifest `name` (which is not a path).
+  const dir = join(base, "readme-cmds-dir");
+  await scaffoldHarness(dir, { name: "totally-different-name" });
+  const readme = readFileSync(join(dir, "README.md"), "utf8");
+
+  // `npm run chat` and `openharness build` take a HARNESS-DIR argument. The bare
+  // name must not be embedded as that path (it wouldn't resolve for the reader).
+  expect(readme).not.toMatch(/npm run chat -- totally-different-name\b/);
+  expect(readme).not.toMatch(/openharness build totally-different-name\b/);
 });

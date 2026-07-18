@@ -1,10 +1,18 @@
-import { expect, test } from "vitest";
+import { afterAll, expect, test } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadPromptLibrary, resolvePrompt, PromptLibraryError } from "./load.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = (name: string) => join(here, "..", "test-fixtures", name);
+
+// Scratch base for tests that need to build a library dir on the fly (subdir
+// entries, quoting edge cases). Static fixtures can't hold a directory named
+// `*.md`, so those cases are constructed here.
+const scratchBase = mkdtempSync(join(tmpdir(), "oh-prompts-test-"));
+afterAll(() => rmSync(scratchBase, { recursive: true, force: true }));
 
 test("loadPromptLibrary lists and loads curated prompts, skipping files with no name", async () => {
   const lib = await loadPromptLibrary(fixture("basic"));
@@ -44,4 +52,24 @@ test("resolvePrompt throws a clear error listing available names when the name i
 
 test("loadPromptLibrary throws a clear error for a nonexistent directory", async () => {
   await expect(loadPromptLibrary(fixture("does-not-exist"))).rejects.toThrow(PromptLibraryError);
+});
+
+test("one non-regular-file entry ending in .md does not abort the whole library", async () => {
+  const dir = mkdtempSync(join(scratchBase, "subdir-md-"));
+  writeFileSync(join(dir, "good.md"), "---\nname: good\n---\nGood body.\n");
+  // A subdirectory whose name ends in `.md` — readFile on it would throw EISDIR.
+  mkdirSync(join(dir, "bad.md"));
+
+  const lib = await loadPromptLibrary(dir);
+  expect([...lib.keys()]).toEqual(["good"]);
+  expect(lib.get("good")!.text).toBe("Good body.");
+});
+
+test("quoted frontmatter values are trimmed after the quotes are stripped", async () => {
+  const dir = mkdtempSync(join(scratchBase, "quoted-trim-"));
+  writeFileSync(join(dir, "build.md"), '---\nname: "build "\n---\nBuild body.\n');
+
+  const lib = await loadPromptLibrary(dir);
+  expect(lib.has("build")).toBe(true);
+  expect(lib.get("build")!.name).toBe("build");
 });

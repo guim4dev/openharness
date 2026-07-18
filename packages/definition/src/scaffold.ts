@@ -67,17 +67,17 @@ A minimal, valid, **offline-safe** \`HarnessDefinition\`:
 
 Bring your own key (any one of \`ANTHROPIC_API_KEY\` / \`OPENAI_API_KEY\` /
 \`GEMINI_API_KEY\` / \`OPENCODE_GO_API_KEY\`, matching the provider below), then
-from the repo root:
+from the repo root (replace \`<harness-dir>\` with the path you scaffolded into):
 
 \`\`\`bash
-npm run chat -- ${name} "Say hello in one line."
+npm run chat -- <harness-dir> "Say hello in one line."
 \`\`\`
 
 ## Build a signed, branded app
 
 \`\`\`bash
 openharness keygen --out org                              # once, keep org.key private
-openharness build ${name} --key org.key --out dist/${name} --org acme --name ${name}
+openharness build <harness-dir> --key org.key --out dist/${name} --org acme --name ${name}
 cd dist/${name} && npx tauri build                         # -> a branded installer
 \`\`\`
 
