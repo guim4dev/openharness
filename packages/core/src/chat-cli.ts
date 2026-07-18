@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { chmodSync, readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   auditExportToNdjson,
   createAuditShipper,
@@ -23,10 +25,64 @@ import { runChat } from "./chat.ts";
 import { runDoctor } from "./doctor.ts";
 import { loginAccount } from "./accounts.ts";
 
-/** Value that follows a `--flag` token in argv, or undefined. */
-function flag(args: string[], name: string): string | undefined {
+/**
+ * Value that follows a `--flag` token in argv, or undefined.
+ *
+ * A flag is treated as having NO value when it is the last token OR the token
+ * that follows is itself another `--flag` — the flags here take
+ * paths/urls/ids/versions, never a `--`-prefixed value, so a following `--`
+ * token is the next flag, not this one's value.
+ */
+export function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
-  return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
+  if (i < 0 || i + 1 >= args.length) return undefined;
+  const next = args[i + 1];
+  return next.startsWith("--") ? undefined : next;
+}
+
+/**
+ * True when `--flag` appears in argv but has no usable value (it is the last
+ * token, or is immediately followed by another `--flag`). Lets a call site
+ * distinguish "flag omitted" from "flag given with no value" and error on the
+ * latter instead of silently changing behavior.
+ */
+export function flagPresentButEmpty(args: string[], name: string): boolean {
+  return args.includes(name) && flag(args, name) === undefined;
+}
+
+/**
+ * Parse and validate a `--port` value. undefined → undefined (server default).
+ * Throws (message mentions `--port`) on anything that is not an integer in
+ * [0, 65535], so an invalid port surfaces as a clear CLI error instead of a
+ * NaN that crashes `server.listen` with a Node-internal message.
+ */
+export function parsePort(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const port = Number.parseInt(raw, 10);
+  if (!/^\d+$/.test(raw) || port > 65535) {
+    throw new Error(`--port must be an integer in [0, 65535], got: ${JSON.stringify(raw)}`);
+  }
+  return port;
+}
+
+/**
+ * First positional (non-flag) token in argv, skipping leading flags so that
+ * documented-optional flags may precede the positional. `valueFlags` names the
+ * flags that consume the following token as their value (that value is not
+ * mistaken for the positional); any other `--token` is a boolean flag skipped
+ * on its own.
+ */
+export function firstPositional(args: string[], valueFlags: Iterable<string> = []): string | undefined {
+  const takesValue = new Set(valueFlags);
+  for (let i = 0; i < args.length; i++) {
+    const tok = args[i];
+    if (tok.startsWith("--")) {
+      if (takesValue.has(tok)) i++; // also skip its value
+      continue;
+    }
+    return tok;
+  }
+  return undefined;
 }
 
 const USAGE = `openharness — build and run a company's own governed AI harness
@@ -71,7 +127,7 @@ Docs: https://github.com/guim4dev/openharness`;
  * argv directly) or the `openharness` bin (`openharness chat ...`, where the
  * leading "chat" subcommand token is stripped below).
  */
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   const args = process.argv.slice(2);
 
   // Top-level help. Only explicit help tokens or no args print the subcommand
@@ -105,6 +161,12 @@ async function main(): Promise<void> {
       const until = flag(args, "--until");
       const typesRaw = flag(args, "--type");
       const out = flag(args, "--out");
+      // `--out` given but value-less (trailing, or followed by another flag)
+      // is a user error — do NOT silently fall back to a stdout dump.
+      if (flagPresentButEmpty(args, "--out")) {
+        process.stderr.write("usage: openharness audit export <file> [...] [--out FILE]  (--out requires a value)\n");
+        process.exit(2);
+      }
       const exported = exportAuditLog(file, {
         ...(since ? { since } : {}),
         ...(until ? { until } : {}),
@@ -289,8 +351,10 @@ async function main(): Promise<void> {
   // Prints every problem; exits 0 when there are no error-level problems
   // (warnings still print), else exits 1.
   if (args[0] === "doctor") {
-    const defDir = args[1];
-    if (!defDir || defDir.startsWith("--")) {
+    // Positional is the first non-flag token, so `--strict-supply-chain` may
+    // precede the dir (`openharness doctor --strict-supply-chain <dir>`).
+    const defDir = firstPositional(args.slice(1));
+    if (!defDir) {
       process.stderr.write("usage: openharness doctor <defDir>\n");
       process.exit(2);
     }
@@ -455,13 +519,20 @@ async function main(): Promise<void> {
       );
       process.exit(2);
     }
+    let port: number | undefined;
+    try {
+      port = parsePort(portArg);
+    } catch (e) {
+      process.stderr.write(`${(e as Error).message}\n`);
+      process.exit(2);
+    }
     const token = process.env.OPENHARNESS_SERVER_TOKEN;
     const server = createOpenHarnessServer({
       bundlesDir,
       auditDir,
       token,
       host,
-      port: portArg ? Number.parseInt(portArg, 10) : undefined,
+      port,
     });
     const { url } = await server.start();
     process.stdout.write(`openharness server listening at ${url}\n`);
@@ -483,7 +554,10 @@ async function main(): Promise<void> {
   process.exit(code);
 }
 
-main().catch((e: unknown) => {
-  process.stderr.write(`${String((e as Error)?.message ?? e)}\n`);
-  process.exit(1);
-});
+// Auto-run only when executed as the entry (not when imported by a test).
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((e: unknown) => {
+    process.stderr.write(`${String((e as Error)?.message ?? e)}\n`);
+    process.exit(1);
+  });
+}
