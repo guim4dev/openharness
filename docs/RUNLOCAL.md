@@ -89,7 +89,9 @@ hosted bundle from a server, verifies it under the org pubkey with a persisted
 monotonic **floor** as the minimum version, and writes an accepted newer bundle
 to an updates dir (advancing the floor). A tampered or rolled-back bundle is
 refused; the floor means an attacker who later drops an older org-signed bundle
-into the updates dir cannot roll the app back.
+into the updates dir cannot roll the app back **below the baked version** (the
+floor file is user-writable, so a local writer can delete it, dropping the
+durable floor to — never below — the version shipped inside the signed app).
 
 ```bash
 # (host a v0.2.0 bundle via `openharness serve --bundles <dir>`; see §4 for serve)

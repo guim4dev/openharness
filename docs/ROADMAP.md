@@ -141,6 +141,17 @@ constrained by them rather than discovering them later:
   SIEM / retention systems — the integration regulated buyers actually ask for.
   ✓ Built: `exportAuditLog` / `openharness audit export` emit filtered records
   plus an integrity manifest (chain verified + head hash), gating on integrity.
+- **Server-side approval with real dual control** so a high-risk `ask` needs a
+  human OTHER than the requester. ✓ Built: a server-rendered approval admin
+  surface (`GET/POST <admin>/approvals`) resolves suspended calls; per-approver
+  tokens make `requireSecondPerson` a real control (the approver identity is
+  authenticated, never body-supplied), failing closed on a missing/self approver
+  or an empty/misconfigured approver token.
+- **Local↔gateway audit reconciliation** so a harness can prove its local chain
+  matches the authoritative one. ✓ Built: `openharness audit reconcile <local>
+  <gateway>` verifies both chains and reports divergence, failing closed on
+  corrupt input (a scoped cross-check; the server's push-rejection stays the
+  authoritative anchor).
 
 Boundary work lands with it: transport, storage bind, endpoint auth, which
 credentials it carries, and who can reach it — with the gateway's URL and public
@@ -151,6 +162,12 @@ questions a human must answer first) is in
 
 ## v2.x — trust the artifact end to end
 
+- **Signed-definition update channel with anti-rollback.** ✓ Built:
+  `openharness update` pulls a newer signed bundle from a server, verifies it
+  under the org pubkey against a persisted, monotonic **floor**, and writes an
+  accepted newer bundle to the updates dir; the desktop app boots pinned to the
+  newest verified bundle ≥ floor. The floor's durable guarantee is anchored to
+  the baked version (a sealed/keychain floor is future hardening).
 - **OS code-signing + notarization** and a signed Tauri updater, so the three
   trust artifacts (our definition signature, the updater signature, the OS
   signature) are all real. Until then the built app is "signed definition inside
