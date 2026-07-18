@@ -74,13 +74,19 @@ test("addAccount: re-adding the same id refreshes it and never duplicates in the
   expect(m.activeAccount("work", "anthropic")?.id).toBe("a");
 });
 
-test("round_robin advances on each markRotated", () => {
+test("round_robin: successive selections rotate through accounts in order", () => {
+  // The whole point of round_robin: consecutive selections spread load across
+  // accounts. Selection itself must advance the cursor (no external call needed).
   const m = new CredentialManager({ accounts: [acct("a"), acct("b")], profiles: [profile("round_robin")] });
   expect(m.activeAccount("work")?.id).toBe("a");
-  m.markRotated("work");
   expect(m.activeAccount("work")?.id).toBe("b");
-  m.markRotated("work");
   expect(m.activeAccount("work")?.id).toBe("a");
+});
+
+test("round_robin: markRotated nudges the cursor forward (manual skip)", () => {
+  const m = new CredentialManager({ accounts: [acct("a"), acct("b")], profiles: [profile("round_robin")] });
+  m.markRotated("work"); // skip "a" before selecting
+  expect(m.activeAccount("work")?.id).toBe("b");
 });
 
 test("provider-aware: selects only accounts whose provider matches (no cross-vendor leak)", () => {

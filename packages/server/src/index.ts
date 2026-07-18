@@ -169,8 +169,17 @@ function findBundle(dir: string, name: string | null): Bundle | null {
     }
     // Skip a structurally-invalid bundle (valid JSON but no usable manifest):
     // reading `manifest.createdAt` off it would throw and 500 the whole endpoint,
-    // taking bundle distribution down for one stray file.
-    if (typeof bundle?.manifest?.name !== "string" || typeof bundle.manifest.createdAt !== "string") continue;
+    // taking bundle distribution down for one stray file. `version` must be a
+    // non-empty string too — it's emitted verbatim as the `x-oh-version` header,
+    // and an undefined value makes writeHead throw, so a version-less NEWEST
+    // bundle would 500 the endpoint and shadow every valid bundle behind it.
+    if (
+      typeof bundle?.manifest?.name !== "string" ||
+      typeof bundle.manifest.createdAt !== "string" ||
+      typeof bundle.manifest.version !== "string" ||
+      bundle.manifest.version.length === 0
+    )
+      continue;
     if (name && bundle.manifest.name !== name) continue;
     if (!best || bundle.manifest.createdAt > best.manifest.createdAt) best = bundle;
   }

@@ -49,8 +49,16 @@ export class CredentialManager {
     if (p.policy === "round_robin") {
       const start = this.rrCursor.get(profileName) ?? 0;
       for (let i = 0; i < ordered.length; i++) {
-        const a = ordered[(start + i) % ordered.length];
-        if (matches(a) && this.healthy(a)) return a;
+        const idx = (start + i) % ordered.length;
+        const a = ordered[idx];
+        if (matches(a) && this.healthy(a)) {
+          // Advance the cursor past the account we're handing out so the NEXT
+          // selection starts after it. Selection itself owns rotation — nothing
+          // else moves the cursor in production, so without this a round_robin
+          // profile silently behaves like "always first".
+          this.rrCursor.set(profileName, (idx + 1) % ordered.length);
+          return a;
+        }
       }
       return undefined;
     }

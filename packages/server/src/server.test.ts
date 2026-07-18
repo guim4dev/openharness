@@ -434,6 +434,34 @@ test("GET /bundle ignores a structurally-invalid .ohbundle instead of 500ing the
   }
 });
 
+test("GET /bundle skips a newest bundle missing manifest.version instead of 500ing (serves the valid older one)", async () => {
+  const bundlesDir = tmp();
+  const { privateKey } = generateKeypair();
+  // A valid, older bundle (version 0.1.0, createdAt ~= now).
+  writeBundle(bundleDefinition(exampleDir, privateKey), join(bundlesDir, "good.ohbundle"));
+  // A structurally-broken NEWEST bundle: has name + createdAt (so it wins the
+  // recency sort and shadows every other bundle) but NO version. Reading
+  // manifest.version for the x-oh-version header 500s the whole endpoint.
+  writeFileSync(
+    join(bundlesDir, "newest-noversion.ohbundle"),
+    JSON.stringify({
+      manifest: { name: "example", createdAt: "2999-01-01T00:00:00.000Z", files: {} },
+      signature: "x",
+    }),
+  );
+
+  const server = createOpenHarnessServer({ bundlesDir, auditDir: tmp() });
+  const { url, close } = await server.start();
+  try {
+    const res = await fetch(`${url}/bundle`);
+    expect(res.status).toBe(200); // not 500 — the version-less newest is skipped, not fatal
+    expect(res.headers.get("x-oh-version")).toBe("0.1.0");
+    expect((await res.json()).manifest.name).toBe("example");
+  } finally {
+    await close();
+  }
+});
+
 test("POST /audit rejects an oversized body with 413 (no unbounded buffering)", async () => {
   const server = createOpenHarnessServer({ bundlesDir: tmp(), auditDir: tmp() });
   const { url, close } = await server.start();
