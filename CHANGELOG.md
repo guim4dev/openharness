@@ -4,7 +4,52 @@ All notable changes to OpenHarness. This project adheres to
 [Semantic Versioning](https://semver.org) and
 [Keep a Changelog](https://keepachangelog.com).
 
-## [Unreleased] — 2026-07-14 (initial build)
+## [Unreleased]
+
+Work on the `dev` branch since `v0.1.0` (548 tests green). Not yet promoted to a
+release tag.
+
+### Added
+
+- **Deploy-hardening seams, config-driven** — the v2 gateway's IdP token exchange
+  (RFC 8693 `POST /token`), a KMS-interface credential broker with an ordered
+  rotation **pool**, and an **out-of-process connector sandbox** (a warm
+  per-(principal, connector) worker) are now selectable from the gateway config
+  file, each a provider-agnostic interface + offline reference impl.
+- **Signed-definition update channel** — `openharness update` pulls a newer signed
+  bundle from a server, verifies it under the org pubkey against a persisted,
+  monotonic anti-rollback **floor**, and writes an accepted newer bundle to the
+  updates dir; the desktop app boots pinned to the newest verified bundle ≥ floor.
+- **Consumer OAuth accounts** — an `accounts.json` `oauth` block registers a
+  loopback **PKCE** auth provider and `openharness login <accountId>` runs the
+  flow; tokens land in the encrypted store, only non-secret refs persist.
+- **Audit `reconcile`** — `openharness audit reconcile <local> <gateway>`
+  cross-checks two chains, verifying both and failing closed on corrupt input.
+- **Per-approver dual-control** — `requireSecondPerson` is a real control with
+  per-approver tokens (the approver identity is authenticated, never body-supplied),
+  alongside the server-side approval admin surface.
+
+### Security
+
+- Five adversarial-review fixes on the second-pass code: an empty-approver-token
+  dual-control bypass (HIGH), an `audit reconcile` fail-OPEN on corrupt input
+  (CRITICAL), OAuth-endpoint HTTPS enforcement, a tampered-baked-bundle
+  anti-rollback floor collapse (now fail-closed), and release env-sealing so a
+  preset launch environment can't downgrade the desktop app to an unverified boot
+  (HIGH, with an `OH_SEALED` sidecar guard).
+- **Desktop launch crash fixed** — resolve `Contents/Resources` from
+  `current_exe()` (tolerating a symlinked exe-path ancestor) and probe for `node`
+  under launchd's bare PATH, so the packaged app boots from any launch context.
+
+### Docs
+
+- `RUNLOCAL.md` verified end-to-end against `dev`; `SECURITY.md` gains a
+  Known-limitations section + the gateway's positive invariants; `ROADMAP` and
+  `vision` corrected for the shipped OAuth-account path and the built gateway.
+
+---
+
+## [0.1.0] — 2026-07-14 — initial build
 
 The first end-to-end build: a company can define its own harness and ship it,
 governed and signed, to a TUI and a desktop app. 431 tests, MIT, built on
@@ -145,7 +190,8 @@ governed and signed, to a TUI and a desktop app. 431 tests, MIT, built on
 
 ### Deferred (roadmap)
 
-Final `tauri build` + fresh-account validation (manual), OS code-signing, remote
-MCP gateway + governed credential pooling, a visual builder, the managed cloud.
-Design proposals for the two next milestones — v1.1 desktop onboarding and the
-v2 remote MCP gateway — are in [`docs/specs/`](docs/specs).
+OS code-signing/notarization of the desktop shell, the managed cloud, and the
+deployment-specific wiring of the gateway seams (a real IdP JWKS, a real
+KMS/secrets-manager). Design proposals are in [`docs/specs/`](docs/specs).
+(The remote MCP gateway, governed credential pooling, and the visual builder
+that earlier drafts listed here all shipped — see Added above and [Unreleased].)
