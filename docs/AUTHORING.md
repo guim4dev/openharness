@@ -117,6 +117,30 @@ Each MCP tool becomes `mcp__<server>__<tool>` and is policy-gated like any tool.
 from the machine-local store, so real credentials never enter `harness.json` or the
 signed bundle. (Refs in the reserved `api-key:*` LLM-credential namespace are rejected.)
 
+## Gateway (v2 remote governance)
+
+Instead of running MCP servers locally with local credentials, a definition can
+point at a **remote governed gateway** — the org holds the real credentials and
+network egress server-side, and the laptop never sees a secret (see the v2 gateway
+in [`ARCHITECTURE.md`](ARCHITECTURE.md) and [`RUNLOCAL.md`](RUNLOCAL.md) §5):
+
+```jsonc
+"gateway": {
+  "url": "https://gateway.acme.internal/mcp",   // the deployed gateway's MCP endpoint
+  "pubkey": "-----BEGIN PUBLIC KEY-----\n…",     // PINNED ed25519 pubkey; the client
+                                                 // verifies a per-request server signature
+  "tools": ["github__list_issues", "notify__send"]  // the pinned virtual catalog to bridge
+}
+```
+
+Each pinned tool bridges into the session as `mcp__<gateway>__<tool>` and is
+policy-gated locally in addition to the gateway's own server-side policy. The boot
+is **fail-closed**: if the declared gateway is unreachable the session refuses to
+start rather than running ungoverned. The client authenticates every request with a
+request-bound, single-use **DPoP** proof (no token passthrough), and requires TLS
+except on loopback. Credentials never appear here — the gateway resolves its own
+per-upstream secret after its policy decision.
+
 ## Credentials (bring your own key)
 
 `credentialProfile` names a profile; accounts come from:

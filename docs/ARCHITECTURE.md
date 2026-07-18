@@ -41,9 +41,10 @@ seam we need is a public API (see "Pi seams" below), so there is no fork.
 | `@openharness/credentials` | Encrypted secret store; **provider-scoped** multi-account rotation/failover; pluggable `AuthProvider` registry; api-key provider (covers OpenCode Go). |
 | `@openharness/mcp` | MCP client (stdio + streamable-HTTP) → bridges each MCP tool to a Pi tool `mcp__<server>__<tool>`; mandatory servers fail fast; server secrets by reference. |
 | `@openharness/policy` | Deny-by-default first-match rules + secret redaction + model allow/deny + argument-matching. Pure engine. |
-| `@openharness/audit` | Hash-chained JSONL, external calls only; `verifyAuditLog`. |
+| `@openharness/audit` | Hash-chained JSONL, external calls only; `verifyAuditLog`, `createAuditShipper` (resumable push to the anchor), `reconcileAuditLogs` (local↔gateway cross-check, fail-closed). |
 | `@openharness/bundle` | ed25519-signed `.ohbundle` definition bundles; `verifyBundle`/`loadVerifiedDefinition` (fail-closed, traversal-safe, anti-rollback). |
 | `@openharness/server` | Thin `GET /bundle` + `POST /audit` (per-source chain-verified), bearer-gated, loopback. |
+| `@openharness/gateway` | The **v2 remote governed pipeline** as an MCP server: DPoP edge auth (no token passthrough), IdP token-exchange (`POST /token`), server-side policy, a KMS-interface credential broker (rotation pool), an out-of-process connector sandbox, return-path redaction, authoritative audit, and fail-closed server-side approval. Runs via `openharness-gateway serve <config.json>`. |
 | `@openharness/build` | `openharness build` — a definition → a branded, signed, ready-to-package Tauri project. |
 | `@openharness/prompts` | Curated prompt library (`loadPromptLibrary`/`resolvePrompt`). |
 | `@openharness/core` | Ties Pi to everything above: `createLiveSession`, `loadAccounts`, the policy/audit extension, the `openharness` CLI. |
