@@ -11,6 +11,7 @@ import {
   type SandboxHost,
 } from "./connector-sandbox.ts";
 import { createStaticKeyIdpVerifier } from "./idp-static.ts";
+import { createJwksIdpVerifier } from "./idp-jwks.ts";
 import { factories as builtinFactories } from "./connectors/registry.ts";
 import type { Connector } from "./connectors/index.ts";
 import { startGatewayHttp, type GatewayHttpServer } from "./http.ts";
@@ -105,16 +106,26 @@ export async function startGatewayFromConfig(
   }
 
   // IdP token exchange (deploy hardening §3): when the config declares it, mount
-  // POST <tokenPath> with a static-key EdDSA-JWT verifier over the configured IdP
-  // public key. Requires the gateway private key (present in config) to mint.
+  // POST <tokenPath> with the verifier the config selects — a JWKS-fetching one
+  // (RS256/ES256, keys selected by `kid` from `jwksUri`) when `jwksUri` is set,
+  // else the static-key EdDSA verifier over `idpPublicKey`. Same IdpVerifier seam
+  // either way. Requires the gateway private key (present in config) to mint.
   const tx = config.tokenExchange;
   const idp = tx
-    ? createStaticKeyIdpVerifier({
-        publicKeyPem: tx.idpPublicKeyPem,
-        issuer: tx.issuer,
-        audience: tx.audience,
-        ...(tx.groupsClaim ? { groupsClaim: tx.groupsClaim } : {}),
-      })
+    ? "jwksUri" in tx
+      ? createJwksIdpVerifier({
+          jwksUri: tx.jwksUri,
+          issuer: tx.issuer,
+          audience: tx.audience,
+          ...(tx.groupsClaim ? { groupsClaim: tx.groupsClaim } : {}),
+          ...(tx.algorithms ? { algorithms: tx.algorithms } : {}),
+        })
+      : createStaticKeyIdpVerifier({
+          publicKeyPem: tx.idpPublicKeyPem,
+          issuer: tx.issuer,
+          audience: tx.audience,
+          ...(tx.groupsClaim ? { groupsClaim: tx.groupsClaim } : {}),
+        })
     : undefined;
 
   // Credential broker (deploy hardening §4). An explicit `opts.broker` wins (a

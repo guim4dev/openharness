@@ -41,20 +41,49 @@ export const gatewayServerConfigSchema = z.object({
   approval: z.object({ timeoutMs: z.number().int().positive(), requireSecondPerson: z.boolean().optional() }).optional(),
   /**
    * IdP token exchange (deploy hardening §3). When present, `POST <tokenPath>`
-   * exchanges an EdDSA-JWT subject token from the org IdP (validated against
-   * `idpPublicKey` with iss/aud/exp) for a DPoP-bound gateway token. Omit for the
-   * dev path where tokens are minted out of band.
+   * exchanges an IdP subject token for a DPoP-bound gateway token. Configure the
+   * IdP key ONE of two ways (exactly one required):
+   *  - `idpPublicKey`: a PEM file path to the IdP's single Ed25519 public key
+   *    (the static-key verifier — a mature, offline shape); OR
+   *  - `jwksUri`: the IdP's JWKS endpoint, from which RS256/ES256 signing keys are
+   *    fetched and selected by `kid` (works with real OIDC IdPs — Okta/Entra/
+   *    Auth0/Google). `algorithms` optionally narrows the accepted set.
+   * Either way the subject token is validated (sig + iss/aud/exp) before minting.
+   * Omit the whole block for the dev path where tokens are minted out of band.
    */
   tokenExchange: z
     .object({
       /** PEM file path (relative to the config) of the IdP's Ed25519 public key. */
-      idpPublicKey: z.string().min(1),
+      idpPublicKey: z.string().min(1).optional(),
+      /** The IdP's JWKS endpoint (https; loopback http allowed for dev). */
+      jwksUri: z.string().min(1).optional(),
+      /** Accepted JWKS signature algorithms (allowlist). Default RS256 + ES256. */
+      algorithms: z.array(z.enum(["RS256", "ES256"])).min(1).optional(),
       issuer: z.string().min(1),
       audience: z.string().min(1),
       groupsClaim: z.string().min(1).optional(),
       tokenPath: z.string().min(1).optional(),
       ttlMs: z.number().int().positive().optional(),
     })
+    .refine((tx) => (tx.idpPublicKey === undefined) !== (tx.jwksUri === undefined), {
+      message: "tokenExchange requires exactly one of 'idpPublicKey' (static key) or 'jwksUri' (JWKS) — not both, not neither",
+    })
+    .refine(
+      (tx) => {
+        if (tx.jwksUri === undefined) return true;
+        try {
+          const u = new URL(tx.jwksUri);
+          const loopback = u.hostname === "127.0.0.1" || u.hostname === "localhost" || u.hostname === "::1" || u.hostname === "[::1]";
+          return u.protocol === "https:" || (u.protocol === "http:" && loopback);
+        } catch {
+          return false;
+        }
+      },
+      {
+        message:
+          "tokenExchange.jwksUri must be a valid https URL (loopback http allowed for dev) — the IdP signing keys must not be fetched over cleartext http",
+      },
+    )
     .optional(),
   /**
    * Credential broker selection (deploy hardening §4). Omit for the default
@@ -100,15 +129,18 @@ export interface ResolvedGatewayServerConfig {
   policyVersion: string;
   auditPath: string;
   approval?: { timeoutMs: number; requireSecondPerson?: boolean };
-  /** Resolved token-exchange config: the IdP public key read to PEM in memory. */
+  /**
+   * Resolved token-exchange config. Exactly one IdP-key variant is present: the
+   * static-key variant carries `idpPublicKeyPem` (read to PEM in memory); the
+   * JWKS variant carries `jwksUri` (+ optional `algorithms`).
+   */
   tokenExchange?: {
-    idpPublicKeyPem: string;
     issuer: string;
     audience: string;
     groupsClaim?: string;
     tokenPath?: string;
     ttlMs?: number;
-  };
+  } & ({ idpPublicKeyPem: string } | { jwksUri: string; algorithms?: ("RS256" | "ES256")[] });
   /** Credential broker selection (pass-through; no file refs to resolve). */
   broker?: GatewayServerConfig["broker"];
   /** Sandbox selection; `registryModule` resolved to an absolute path. */
@@ -136,12 +168,18 @@ export function loadGatewayServerConfig(configPath: string): ResolvedGatewayServ
 
   const tokenExchange = cfg.tokenExchange
     ? {
-        idpPublicKeyPem: readFileSync(resolve(baseDir, cfg.tokenExchange.idpPublicKey), "utf8"),
         issuer: cfg.tokenExchange.issuer,
         audience: cfg.tokenExchange.audience,
         ...(cfg.tokenExchange.groupsClaim ? { groupsClaim: cfg.tokenExchange.groupsClaim } : {}),
         ...(cfg.tokenExchange.tokenPath ? { tokenPath: cfg.tokenExchange.tokenPath } : {}),
         ...(cfg.tokenExchange.ttlMs ? { ttlMs: cfg.tokenExchange.ttlMs } : {}),
+        // The schema's `.refine` guarantees exactly one key variant is set.
+        ...(cfg.tokenExchange.jwksUri
+          ? {
+              jwksUri: cfg.tokenExchange.jwksUri,
+              ...(cfg.tokenExchange.algorithms ? { algorithms: cfg.tokenExchange.algorithms } : {}),
+            }
+          : { idpPublicKeyPem: readFileSync(resolve(baseDir, cfg.tokenExchange.idpPublicKey as string), "utf8") }),
       }
     : undefined;
 

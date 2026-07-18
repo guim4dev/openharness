@@ -98,3 +98,16 @@ test("an array `aud` containing the expected audience is accepted", async () => 
   const tok = mintJwt(idp.privateKey, { ...base, aud: ["other-app", "openharness-gateway"] });
   expect(denied(await verifier(idp.publicKey).verifySubjectToken(tok))).toBe(false);
 });
+
+test("a non-string subject token is denied, not thrown (seam guard)", async () => {
+  const idp = idpKeypair();
+  const v = verifier(idp.publicKey);
+  for (const bad of [12345, null, undefined, {}] as unknown[]) {
+    expect(denied(await v.verifySubjectToken(bad as string))).toBe(true);
+  }
+});
+
+test("a whitespace-only sub is denied", async () => {
+  const idp = idpKeypair();
+  expect(denied(await verifier(idp.publicKey).verifySubjectToken(mintJwt(idp.privateKey, { ...base, sub: "   " })))).toBe(true);
+});

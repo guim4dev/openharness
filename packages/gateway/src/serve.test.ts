@@ -2,6 +2,8 @@ import { afterEach, expect, test } from "vitest";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { InMemorySecretStore } from "@openharness/credentials";
@@ -24,9 +26,12 @@ const CLAIMS: GatewayClaims = {
 
 let dir: string | undefined;
 let running: GatewayHttpServer | undefined;
+let jwksServer: Server | undefined;
 afterEach(async () => {
   await running?.close();
   running = undefined;
+  if (jwksServer) await new Promise<void>((r) => jwksServer!.close(() => r()));
+  jwksServer = undefined;
   if (dir) rmSync(dir, { recursive: true, force: true });
   dir = undefined;
 });
@@ -337,6 +342,81 @@ test("a config with tokenExchange exchanges an IdP JWT for a DPoP token that run
   // A forged subject token (bad issuer) gets no token.
   const badBody = b64u({ sub: "eve", iss: "https://evil", aud: "openharness-gateway", exp: Math.floor(Date.now() / 1000) + 300 });
   const badJwt = `${head}.${badBody}.${sign(null, Buffer.from(`${head}.${badBody}`), idp.privateKey).toString("base64url")}`;
+  const bad = await fetch(running.url.replace("/mcp", "/token"), {
+    method: "POST",
+    headers: { authorization: `Bearer ${badJwt}`, "x-oh-dpop-key": Buffer.from(client.publicKey).toString("base64url") },
+  });
+  expect(bad.status).toBe(401);
+});
+
+test("a config with a JWKS tokenExchange exchanges an RS256 IdP JWT (verifier fetched from jwksUri)", async () => {
+  dir = mkdtempSync(join(tmpdir(), "oh-gw-jwks-"));
+  const gw = generateAuthKeypair();
+  // The IdP signs RS256 and publishes its public key at a JWKS endpoint.
+  const idp = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const jwk = { ...idp.publicKey.export({ format: "jwk" }), kid: "rsa-1", alg: "RS256", use: "sig" };
+  jwksServer = createServer((_req, res) => {
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ keys: [jwk] }));
+  });
+  await new Promise<void>((r) => jwksServer!.listen(0, "127.0.0.1", () => r()));
+  const jwksUri = `http://127.0.0.1:${(jwksServer.address() as AddressInfo).port}/jwks`;
+
+  writeFileSync(join(dir, "gw.pub"), gw.publicKey);
+  writeFileSync(join(dir, "gw.key"), gw.privateKey);
+  writeFileSync(join(dir, "policy.json"), JSON.stringify({ default: "allow", rules: [] }));
+  writeFileSync(
+    join(dir, "gateway.json"),
+    JSON.stringify({
+      host: "127.0.0.1",
+      keys: { publicKey: "gw.pub", privateKey: "gw.key" },
+      policy: "policy.json",
+      policyVersion: "1.0.0",
+      auditPath: "audit.log",
+      tokenExchange: { jwksUri, issuer: "https://idp.acme.com", audience: "openharness-gateway" },
+      catalog: [{ name: "github__list_issues", connectorId: "github", upstreamId: "github" }],
+      connectors: [{ id: "github", type: "github-read" }],
+    }),
+  );
+  const resolved = loadGatewayServerConfig(join(dir, "gateway.json"));
+  const store = new InMemorySecretStore();
+  await store.set("upstream:github", "ghp_orgtoken");
+  running = await startGatewayFromConfig(resolved, { secretStore: store, connectorFactories: { "github-read": stubGithub } });
+
+  // Mint an IdP-signed RS256 JWT (kid selects the JWKS key).
+  const b64u = (o: unknown): string => Buffer.from(JSON.stringify(o)).toString("base64url");
+  const head = b64u({ alg: "RS256", typ: "JWT", kid: "rsa-1" });
+  const body = b64u({
+    sub: "alice@acme.com",
+    iss: "https://idp.acme.com",
+    aud: "openharness-gateway",
+    exp: Math.floor(Date.now() / 1000) + 300,
+    groups: ["eng"],
+  });
+  const jwt = `${head}.${body}.${sign("RSA-SHA256", Buffer.from(`${head}.${body}`), idp.privateKey).toString("base64url")}`;
+
+  const client = generateAuthKeypair();
+  const res = await fetch(running.url.replace("/mcp", "/token"), {
+    method: "POST",
+    headers: { authorization: `Bearer ${jwt}`, "x-oh-dpop-key": Buffer.from(client.publicKey).toString("base64url") },
+  });
+  expect(res.status).toBe(200);
+  const { access_token } = (await res.json()) as { access_token: string };
+
+  const fetchImpl = createDpopFetch(access_token, client.privateKey, client.publicKey, undefined, undefined, gw.publicKey);
+  const mcp = new Client({ name: "harness", version: "0" }, { capabilities: {} });
+  await mcp.connect(new StreamableHTTPClientTransport(new URL(running.url), { fetch: fetchImpl as unknown as typeof fetch }));
+  try {
+    const call = await mcp.callTool({ name: "github__list_issues", arguments: { owner: "acme", repo: "app" } });
+    expect(call.isError).toBeFalsy();
+    expect(JSON.stringify(call.content)).toContain("a bug");
+  } finally {
+    await mcp.close();
+  }
+
+  // A token signed by a DIFFERENT key (right kid, wrong signer) gets no token.
+  const attacker = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const badJwt = `${head}.${body}.${sign("RSA-SHA256", Buffer.from(`${head}.${body}`), attacker.privateKey).toString("base64url")}`;
   const bad = await fetch(running.url.replace("/mcp", "/token"), {
     method: "POST",
     headers: { authorization: `Bearer ${badJwt}`, "x-oh-dpop-key": Buffer.from(client.publicKey).toString("base64url") },

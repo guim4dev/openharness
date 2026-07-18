@@ -41,6 +41,8 @@ export { exchangeToken } from "./token-exchange.ts";
 export type { IdpVerifier, TokenExchangeRequest, ExchangedToken } from "./token-exchange.ts";
 export { createStaticKeyIdpVerifier } from "./idp-static.ts";
 export type { StaticKeyIdpOptions } from "./idp-static.ts";
+export { createJwksIdpVerifier } from "./idp-jwks.ts";
+export type { JwksIdpOptions } from "./idp-jwks.ts";
 export { loadGatewayServerConfig, gatewayServerConfigSchema } from "./config.ts";
 export type { GatewayServerConfig, ResolvedGatewayServerConfig } from "./config.ts";
 export { startGatewayFromConfig } from "./serve.ts";

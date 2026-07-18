@@ -58,6 +58,9 @@ export function createStaticKeyIdpVerifier(opts: StaticKeyIdpOptions): IdpVerifi
 
   return {
     async verifySubjectToken(subjectToken: string): Promise<{ sub: string; groups: string[] } | Deny> {
+      // Guard the exported seam against a non-string caller — the contract is
+      // "any bad input → deny", never a throw across the seam.
+      if (typeof subjectToken !== "string") return { deny: "subject token is not a string" };
       const parts = subjectToken.split(".");
       if (parts.length !== 3) return { deny: "subject token is not a compact JWT" };
       const [h, p, s] = parts;
@@ -94,7 +97,7 @@ export function createStaticKeyIdpVerifier(opts: StaticKeyIdpOptions): IdpVerifi
         if (nowSec + tol < payload.nbf) return { deny: "subject token is not yet valid" };
       }
 
-      if (typeof payload.sub !== "string" || payload.sub.length === 0) return { deny: "subject token has no sub" };
+      if (typeof payload.sub !== "string" || payload.sub.trim().length === 0) return { deny: "subject token has no sub" };
       const rawGroups = payload[groupsClaim];
       const groups = Array.isArray(rawGroups) ? rawGroups.filter((g): g is string => typeof g === "string") : [];
 
