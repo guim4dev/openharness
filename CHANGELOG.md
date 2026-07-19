@@ -6,7 +6,7 @@ All notable changes to OpenHarness. This project adheres to
 
 ## [Unreleased]
 
-Work on the `dev` branch since `v0.1.0` (644 tests green). Not yet promoted to a
+Work on the `dev` branch since `v0.1.0` (663 tests green). Not yet promoted to a
 release tag.
 
 ### Changed (BREAKING)
