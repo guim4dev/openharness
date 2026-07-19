@@ -6,7 +6,7 @@ All notable changes to OpenHarness. This project adheres to
 
 ## [Unreleased]
 
-Work on the `dev` branch since `v0.1.0` (663 tests green). Not yet promoted to a
+Work on the `dev` branch since `v0.1.0` (668 tests green). Not yet promoted to a
 release tag.
 
 ### Changed (BREAKING)
@@ -85,6 +85,14 @@ release tag.
   3000-level nesting → no fail-open in the hook), and the blob deny/ask surface
   stays fail-safe. A "teeth" test proves the smuggled value is reachable and that
   field-scoping is what refuses it.
+- **Full-path composition test** (`full-path.e2e.test.ts`) proves the seam the unit
+  suites left uncovered: the SUPPLY-CHAIN half (sign → `resolvePinnedBundle` at the
+  anti-rollback floor) fused to the RUNTIME half in one run — a `verified` boot with
+  NO inline policy enforces the signed bundle's own `policy.json`, so a denied MCP
+  call is blocked and an allowed call redacted purely by the bundle's policy; the
+  audit chain verifies and reconciles clean against a gateway chain of the same
+  governed call; and a tampered bundle / a below-floor bundle is refused by BOTH
+  resolution and the boot. This seam is exactly where the two-stage-floor bug lived.
 - **Byte-reproducible signed bundles.** `bundleDefinition` now honors an explicit
   `createdAt` option and the `SOURCE_DATE_EPOCH` reproducible-builds env var; with
   the timestamp pinned, two independent builds of the same definition produce

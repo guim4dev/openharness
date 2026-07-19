@@ -71,6 +71,16 @@ them breaks, that's a security bug regardless of how it's triggered:
   can therefore cross-verify that a distributed bundle matches its published
   source, not merely that *some* org key signed it. (Left unpinned, `createdAt` is
   the wall clock — the only non-reproducible field.)
+- **The policy that governs a running session is the one carried by the signed,
+  pinned, floor-checked bundle — not an inline convenience.** The two halves
+  compose: `resolvePinnedBundle` selects the bundle at the effective anti-rollback
+  floor, and a `verified` boot enforces THAT bundle's `policy.json` (deny + redact)
+  over live tool calls, ending in the audit chain. This seam — artifact trust →
+  runtime governance — is proven end to end in `full-path.e2e.test.ts`: a denied
+  MCP call is blocked and an allowed call is redacted purely by the bundle's
+  policy, the audit chain verifies and reconciles clean against a gateway chain of
+  the same governed call, and a tampered bundle or one below the floor is refused
+  by BOTH resolution and the boot (fail-closed at each seam).
 - **Credentials are provider-scoped.** Multi-account rotation/failover
   (`CredentialManager`) only ever selects an account whose `provider` matches
   the caller's — a harness talking to one vendor can never be handed another
