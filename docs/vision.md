@@ -13,8 +13,10 @@ wedge is license purity + verifiable governance, NOT self-hosting).
 
 ## 0. Current state (what's actually built)
 
-On `dev` (with `v0.1.0` tagged on `main`), **548 tests green**, typecheck +
-`cargo check` green. Since 0.1.0, `dev` adds the config-driven deploy-hardening
+On `dev` (with `v0.1.0` tagged on `main`), **665 tests green**, typecheck +
+`cargo check` green, and CI hardened + proven green on a real OS/Node matrix
+(ubuntu+macOS, desktop compile, SBOM + provenance; the production dependency tree
+is `npm audit`-clean). Since 0.1.0, `dev` adds the config-driven deploy-hardening
 seams (IdP token-exchange, KMS broker pool, out-of-process connector sandbox), a
 signed-definition **update channel** with a persisted anti-rollback floor (wired
 into desktop boot), **consumer OAuth accounts** (loopback PKCE + `openharness
