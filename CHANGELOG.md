@@ -77,6 +77,14 @@ release tag.
   seventh HIGH — an argument-content `allow` over the blob of all fields was
   fail-open (a disallowed value could be smuggled into another field). A content
   `allow` now pins one named field; the loader refuses a non-`bash` blob `allow`.
+- **Property/fuzz harness on the policy matcher** (`matcher.fuzz.test.ts`, seeded
+  PRNG, no new dep) explores the input space the example suite doesn't: 15k+
+  adversarial JSON tool-calls assert the field-scoped `allow` NEVER fires from a
+  smuggled value (sibling field, nested/array copy, case-variant key, JSON
+  `__proto__`, prototype method-name field), the matcher is total (no throw on
+  3000-level nesting → no fail-open in the hook), and the blob deny/ask surface
+  stays fail-safe. A "teeth" test proves the smuggled value is reachable and that
+  field-scoping is what refuses it.
 - **Anti-rollback floor unified across both enforcement stages.** The desktop boot
   verified the bundle twice — stage 1 (`resolvePinnedBundle`) picked the newest
   bundle ≥ the *effective* floor `max(persisted, baked)`, but stage 2 (the sidecar)
