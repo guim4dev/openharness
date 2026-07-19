@@ -48,8 +48,8 @@ release tag.
   `current_exe()` (tolerating a symlinked exe-path ancestor) and probe for `node`
   under launchd's bare PATH, so the packaged app boots from any launch context.
 - **Three adversarial correctness sweeps** over the code the trust-boundary
-  reviews didn't cover found + fixed **36 of 37** confirmed bugs (each with a
-  regression test), including six HIGH the passing suite missed: a symlink bypass
+  reviews didn't cover found + fixed **all 37** confirmed bugs (each with a
+  regression test), including seven HIGH the passing suite missed: a symlink bypass
   of the loader's file-exfiltration guard (`resolve()` → `realpath()`), a
   materialize atomicity/fail-closed violation, a session `close()` that leaked
   every resource if one teardown step threw, a builder MCP round-trip that dropped
@@ -58,9 +58,11 @@ release tag.
   no forgery/fail-open bypass after 43+ PoC attacks. Plus MCP result caps, a
   gateway tool-name guard, redaction of secret object-keys, an atomic secret-store
   flush, a `/bundle` version guard, socket-drop turn termination, and builder
-  round-trip/verdict/reselect fixes. The one deferred finding — an
-  argument-content `allow` that is fail-open for non-`bash` tools — is documented
-  in `SECURITY.md` (safe fix: field-scoped matching).
+  round-trip/verdict/reselect fixes.
+- **Field-scoped policy argument matching** (`tool(<field>=<glob>)`) closes the
+  seventh HIGH — an argument-content `allow` over the blob of all fields was
+  fail-open (a disallowed value could be smuggled into another field). A content
+  `allow` now pins one named field; the loader refuses a non-`bash` blob `allow`.
 
 ### Docs
 
