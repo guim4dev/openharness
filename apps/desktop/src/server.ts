@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { configDir, loadAccounts, resolvePinnedBundle } from "@openharness/core";
+import { configDir, loadAccounts, resolvePinnedBundle, maxVersion } from "@openharness/core";
 import { loadHarnessDefinition } from "@openharness/definition";
 import { startSidecar } from "./sidecar.ts";
 import type { StartSidecarOptions } from "./sidecar.ts";
@@ -57,16 +57,23 @@ async function main(): Promise<void> {
   // bundle itself doesn't verify), fall back to the baked path so the sidecar
   // fails loud with the precise reason instead of here.
   let bootBundlePath = bundlePath;
+  // The floor the sidecar (stage 2) re-verifies at MUST be at least the effective
+  // floor stage-1 selection used — otherwise a swapped org-signed bundle in
+  // [baked, effectiveFloor) could pass the sidecar's weaker baked-only check.
+  // Stricter wins: start at the baked OH_MIN_VERSION, raise to the resolved floor.
+  let sidecarMinVersion = minVersion;
   if (bundlePath && pubkeyPath) {
     const updatesDir = process.env.OH_UPDATES_DIR ?? join(configDir(), "updates");
     const floorPath = process.env.OH_FLOOR_PATH ?? join(configDir(), "version-floor.txt");
     try {
-      bootBundlePath = resolvePinnedBundle({
+      const resolved = resolvePinnedBundle({
         bakedBundlePath: bundlePath,
         updatesDir,
         pubkeyPem: readFileSync(pubkeyPath, "utf8"),
         floorPath,
-      }).path;
+      });
+      bootBundlePath = resolved.path;
+      sidecarMinVersion = minVersion ? maxVersion(minVersion, resolved.floor) : resolved.floor;
     } catch {
       bootBundlePath = bundlePath;
     }
@@ -74,7 +81,7 @@ async function main(): Promise<void> {
 
   const verified =
     bundlePath && pubkeyPath
-      ? { bundlePath: bootBundlePath as string, pubkeyPath, ...(minVersion ? { minVersion } : {}) }
+      ? { bundlePath: bootBundlePath as string, pubkeyPath, ...(sidecarMinVersion ? { minVersion: sidecarMinVersion } : {}) }
       : undefined;
   const harnessPath = process.env.OH_HARNESS_PATH ?? process.argv[2];
 

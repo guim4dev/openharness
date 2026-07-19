@@ -134,6 +134,29 @@ test("resolvePinnedBundle prefers a newer verified update and IGNORES a rollback
   expect(() => resolvePinnedBundle({ bakedBundlePath: baked, updatesDir, pubkeyPem: KEYS.publicKey, floorPath })).toThrow();
 });
 
+test("resolvePinnedBundle RETURNS the effective floor so stage-2 (the sidecar) re-verifies at the SAME bar, not a weaker baked-only one", () => {
+  const dir = tmp();
+  const updatesDir = join(dir, "updates");
+  const floorPath = join(dir, "floor.txt");
+  const baked = join(dir, "baked.ohbundle");
+  mkdirSync(updatesDir, { recursive: true });
+  writeBundle(signAtVersion(dir, "0.1.0"), baked); // baked anchor
+  writeBundle(signAtVersion(dir, "0.5.0"), join(updatesDir, "example-0.5.0.ohbundle")); // a real update advanced the floor
+  writeFileSync(floorPath, "0.5.0\n");
+
+  const picked = resolvePinnedBundle({ bakedBundlePath: baked, updatesDir, pubkeyPem: KEYS.publicKey, floorPath });
+  expect(picked.version).toBe("0.5.0");
+  // The returned floor is the EFFECTIVE floor max(persisted 0.5.0, baked 0.1.0) — NOT the
+  // weaker baked-only 0.1.0. server.ts threads this into the sidecar's minVersion so the
+  // second verification stage re-checks at 0.5.0 (a swapped org-signed bundle in [0.1.0, 0.5.0)
+  // cannot slip past a baked-only check). Two stages, one source of truth for the floor.
+  expect(picked.floor).toBe("0.5.0");
+
+  // With NO persisted floor raising it, the effective floor is exactly the baked version.
+  writeFileSync(floorPath, ""); // empty -> falls back to baked version
+  expect(resolvePinnedBundle({ bakedBundlePath: baked, updatesDir, pubkeyPem: KEYS.publicKey, floorPath }).floor).toBe("0.1.0");
+});
+
 test("resolve FAILS CLOSED when the baked bundle is PRESENT but does not verify (must not collapse the floor to boot an older update)", () => {
   const dir = tmp();
   const updatesDir = join(dir, "updates");

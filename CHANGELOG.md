@@ -6,7 +6,7 @@ All notable changes to OpenHarness. This project adheres to
 
 ## [Unreleased]
 
-Work on the `dev` branch since `v0.1.0` (643 tests green). Not yet promoted to a
+Work on the `dev` branch since `v0.1.0` (644 tests green). Not yet promoted to a
 release tag.
 
 ### Changed (BREAKING)
@@ -77,6 +77,13 @@ release tag.
   seventh HIGH — an argument-content `allow` over the blob of all fields was
   fail-open (a disallowed value could be smuggled into another field). A content
   `allow` now pins one named field; the loader refuses a non-`bash` blob `allow`.
+- **Anti-rollback floor unified across both enforcement stages.** The desktop boot
+  verified the bundle twice — stage 1 (`resolvePinnedBundle`) picked the newest
+  bundle ≥ the *effective* floor `max(persisted, baked)`, but stage 2 (the sidecar)
+  re-verified at only the baked `OH_MIN_VERSION`, a weaker bar. `resolvePinnedBundle`
+  now returns that effective floor and `server.ts` threads it into the sidecar's
+  `minVersion` (stricter wins), so both stages check against one source of truth and
+  a swapped org-signed bundle in `[baked, floor)` cannot slip past the second stage.
 
 ### Docs
 

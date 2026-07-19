@@ -57,7 +57,7 @@ export function readFloor(floorPath: string, fallback = "0.0.0"): string {
 }
 
 /** The larger of two versions (the anti-rollback lower bound never drops). */
-function maxVersion(a: string, b: string): string {
+export function maxVersion(a: string, b: string): string {
   return isOlder(a, b) ? b : a;
 }
 
@@ -152,7 +152,7 @@ export interface ResolveOptions {
  * floor file, nothing OLDER than the baked bundle is ever booted. A rollback or
  * tampered bundle in the updates dir is refused and skipped; ties go to baked.
  */
-export function resolvePinnedBundle(opts: ResolveOptions): { path: string; version: string } {
+export function resolvePinnedBundle(opts: ResolveOptions): { path: string; version: string; floor: string } {
   // The baked bundle's own version is the trustworthy lower bound. Verify it
   // WITHOUT a floor to read its version. If the baked bundle is PRESENT but does
   // not verify under the org key, that is a hard integrity failure — refuse to
@@ -197,5 +197,8 @@ export function resolvePinnedBundle(opts: ResolveOptions): { path: string; versi
   }
 
   if (!best) throw new BundleVerificationError("no bundle verifies under the org key at the current floor");
-  return best;
+  // Return the EFFECTIVE floor too so the caller can re-verify (stage 2) at the
+  // SAME floor this selection (stage 1) used — not a weaker baked-only floor, which
+  // would let a swapped org-signed bundle in [baked, floor) slip past the sidecar.
+  return { ...best, floor };
 }
