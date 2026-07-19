@@ -83,3 +83,35 @@ test("rejects genuinely malformed matches (unbalanced parens, empty tool name)",
 test("schema is exported for external validation", () => {
   expect(policySchema.safeParse({ default: "deny" }).success).toBe(true);
 });
+
+test("rejects a blob-field ALLOW (fail-open) but accepts field-scoped, bash, and deny/ask", () => {
+  // A non-bash blob-content ALLOW is fail-open (smuggling across fields) → rejected.
+  expect(() =>
+    parsePolicy({ default: "deny", rules: [{ match: "mcp__db__query(*SELECT*)", action: "allow" }] }),
+  ).toThrow(/fail-OPEN|field-scoped/i);
+  // Field-scoped allow pins the governed field → accepted (the sound form).
+  expect(() =>
+    parsePolicy({ default: "deny", rules: [{ match: "mcp__db__query(sql=SELECT *)", action: "allow" }] }),
+  ).not.toThrow();
+  // bash arg-content allow matches its single `command` field → accepted.
+  expect(() =>
+    parsePolicy({ default: "deny", rules: [{ match: "bash(git *)", action: "allow" }] }),
+  ).not.toThrow();
+  // Non-bash blob deny/ask are fail-safe → accepted.
+  expect(() =>
+    parsePolicy({
+      default: "allow",
+      rules: [
+        { match: "mcp__db__query(*DROP*)", action: "deny" },
+        { match: "mcp__db__query(*DELETE*)", action: "ask" },
+      ],
+    }),
+  ).not.toThrow();
+  // The rejection also covers principal (group) rules.
+  expect(() =>
+    parsePolicy({
+      default: "deny",
+      principals: [{ group: "eng", rules: [{ match: "mcp__db__query(*read*)", action: "allow" }] }],
+    }),
+  ).toThrow(/fail-OPEN|field-scoped/i);
+});

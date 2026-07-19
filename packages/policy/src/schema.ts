@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isMalformedMatch } from "./match-form.ts";
+import { isMalformedMatch, PARAMETERIZED, FIELD_SCOPED, BASH_TOOL } from "./match-form.ts";
 import type { Policy } from "./types.ts";
 
 export class PolicyError extends Error {}
@@ -59,6 +59,23 @@ export function parsePolicy(raw: unknown): Policy {
       throw new PolicyError(
         `policy rule ${JSON.stringify(rule.match)}: malformed match — expected a plain tool-name glob or a parameterized \`name(<glob>)\` with a non-empty name and balanced parens`,
       );
+    }
+    // A parameterized ALLOW that matches the BLOB of all argument fields is
+    // fail-OPEN: a disallowed value can be smuggled into another field while a
+    // benign one satisfies the glob. Only two argument-content ALLOW forms are
+    // sound: `bash(<glob>)` (bash matches its single `command`) and the
+    // field-scoped `tool(field=<glob>)` (pins the governed field). Refuse a
+    // non-bash, non-field-scoped parameterized allow at load rather than let a
+    // policy silently permit what its author meant to restrict.
+    const p = PARAMETERIZED.exec(rule.match);
+    if (p && rule.action === "allow") {
+      const isBash = p[1].trim() === BASH_TOOL;
+      const isFieldScoped = FIELD_SCOPED.test(p[2]);
+      if (!isBash && !isFieldScoped) {
+        throw new PolicyError(
+          `policy rule ${JSON.stringify(rule.match)}: an argument-content ALLOW over the blob of all fields is fail-OPEN (a disallowed value can be smuggled into another field). Use the field-scoped form \`${p[1].trim()}(<field>=<glob>)\` to pin the governed field, \`bash(<glob>)\`, or an unparameterized allow — or use \`deny\`/\`ask\`.`,
+        );
+      }
     }
   }
   return parsed.data;

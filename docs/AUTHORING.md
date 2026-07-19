@@ -69,9 +69,12 @@ Deny-by-default, first-match. Enforced in-process at every tool call and model r
     { "match": "bash(git *)", "action": "allow" },              // bash: matches the command
     { "match": "mcp__internal_docs__*", "action": "allow" },
     { "match": "mcp__*__delete_*", "action": "deny", "reason": "destructive ops need a human" },
-    // argument-matching works for ANY tool: <tool>(<glob>) matches (case-insensitive)
-    // a canonical string of ALL the tool's string args (nested included) — fail-safe:
-    { "match": "mcp__db__write_query(*DELETE*)", "action": "ask" }
+    // BLOB argument-match: <tool>(<glob>) matches (case-insensitive) a string of ALL
+    // the tool's string args (nested included). Fail-SAFE — use only for deny/ask:
+    { "match": "mcp__db__write_query(*DELETE*)", "action": "ask" },
+    // FIELD-SCOPED: <tool>(<field>=<glob>) matches ONE named arg field. The sound
+    // form for an allow (a disallowed value can't be smuggled into another field):
+    { "match": "mcp__mail__send(to=*@acme.test*)", "action": "allow" }
   ],
   "models": { "allow": ["anthropic/claude-*"] },   // deny wins; allow = allow-list
   "redact": [                                        // applied to args AND results
@@ -81,9 +84,13 @@ Deny-by-default, first-match. Enforced in-process at every tool call and model r
 }
 ```
 
-- `match` is a glob over the tool identity: a tool name (`mcp__linear__delete_*`),
-  or the parameterized `tool(<glob>)` form (`bash(...)` matches the command; any
-  other tool matches its canonical arg string).
+- `match` is a glob over the tool identity: a tool name (`mcp__linear__delete_*`);
+  the **blob** `tool(<glob>)` form (`bash(...)` matches its `command`; any other
+  tool matches a blob of ALL its string args — fail-safe, so **deny/ask only**);
+  or the **field-scoped** `tool(<field>=<glob>)` form, which matches one named
+  top-level arg field. An argument-content **`allow`** must use the field-scoped
+  (or `bash`) form — the loader refuses a non-bash blob `allow` because a
+  disallowed value could be smuggled into another field (fail-open).
 - `action`: `deny` → blocked (the `reason` is shown to the model); `ask` → a human
   approves/denies in the TUI/desktop (fail-closed if no human); `allow` → runs.
 - `redact.pattern` is a JS RegExp source; `g` is always forced.

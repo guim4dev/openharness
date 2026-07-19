@@ -15,19 +15,27 @@ test("a principal's group rule grants ahead of a base ask", () => {
   expect(decide(policy, principal(["eng"]), "mcp__github__merge_pr", {}).decision).toBe("ask");
 });
 
-test("argument-level rule fires for a principal (recipient allowlist on a send tool)", () => {
+test("field-scoped rule fires for a principal (recipient allowlist on a send tool)", () => {
   const policy = parsePolicy({
     default: "deny",
     rules: [{ match: "mcp__mail__send", action: "allow" }],
     principals: [
-      // Support can only send to @acme.test; anything else denied.
-      { group: "support", rules: [{ match: "mcp__mail__send(*@acme.test*)", action: "allow" }, { match: "mcp__mail__send", action: "deny", reason: "external recipient" }] },
+      // Support can only send to @acme.test; anything else denied. Field-scoped on
+      // `to` so a disallowed recipient can't be smuggled past via another field.
+      { group: "support", rules: [{ match: "mcp__mail__send(to=*@acme.test*)", action: "allow" }, { match: "mcp__mail__send", action: "deny", reason: "external recipient" }] },
     ],
   });
   expect(decide(policy, principal(["support"]), "mcp__mail__send", { to: "x@acme.test" }).decision).toBe("allow");
   const external = decide(policy, principal(["support"]), "mcp__mail__send", { to: "x@evil.com" });
   expect(external.decision).toBe("deny");
   expect(external.reason).toBe("external recipient");
+  // The bypass is closed: a benign value in ANOTHER field (cc) no longer satisfies
+  // the allowlist — only `to` is matched, so the external send still denies.
+  const smuggled = decide(policy, principal(["support"]), "mcp__mail__send", {
+    to: "x@evil.com",
+    cc: "trusted@acme.test",
+  });
+  expect(smuggled.decision).toBe("deny");
 });
 
 test("no matching group falls through to the base policy", () => {

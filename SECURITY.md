@@ -140,17 +140,6 @@ an open exploit, with the fail-safe consequence noted:
   next to `secrets.enc`, both `0600`). This defends against backup/accidental
   disclosure, not against a principal who can read the directory; an OS-keychain
   backend is the tracked follow-up.
-- **Argument-content `allow` rules are fail-OPEN for non-`bash` tools.** A
-  parameterized rule `tool(<glob>)` matches the inner glob against a newline blob
-  of ALL of the tool's argument fields. For `deny`/`ask` this is fail-SAFE (a
-  dangerous substring anywhere fires the rule); for `allow` it is fail-OPEN — an
-  allow gated on content (e.g. `mcp__mail__send(*@acme.test*)` to allowlist a
-  recipient) can be bypassed by smuggling the disallowed value into another field
-  while a benign field satisfies the glob. `bash(<glob>)` is safe (it matches the
-  single `command` field). Until field-scoped matching lands (e.g.
-  `tool(to=<glob>)`), express argument-content controls as `deny`/`ask`, not
-  `allow`. (Tracked: add field-scoped arg matching so a content `allow` can name
-  the governed field.)
 
 ## Scope
 

@@ -17,6 +17,19 @@
 export const PARAMETERIZED = /^([^()]+)\((.*)\)$/s;
 
 /**
+ * A FIELD-SCOPED inner form: `field=<glob>` inside the parens matches the glob
+ * against the value of that ONE named top-level argument field (e.g.
+ * `mcp__mail__send(to=*@acme.test*)`), instead of the blob of ALL fields. This is
+ * the only sound way to write an argument-content `allow`: the blob form is
+ * fail-OPEN for allow (a disallowed value can be smuggled into another field),
+ * while a field-scoped rule pins the governed field so nothing else can satisfy
+ * it. The `field` is a plain identifier; anything else (a glob starting with `*`,
+ * a value containing `=` with no leading identifier) is NOT field-scoped and
+ * remains the blob form.
+ */
+export const FIELD_SCOPED = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s;
+
+/**
  * The one tool whose parameterized argument is its `command` and is matched
  * case-SENSITIVELY. Every other tool matches against its canonical arg string
  * case-insensitively. (Previously this named the ONLY tool that could be

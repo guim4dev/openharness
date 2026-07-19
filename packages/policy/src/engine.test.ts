@@ -230,3 +230,16 @@ test("redact scrubs a secret that appears as an object KEY, not only as a value"
   expect(json).not.toContain("sk-def456");
   expect(json).toContain("[REDACTED]");
 });
+
+test("field-scoped match pins the named field — an allow can't be smuggled past via another field", () => {
+  const p: Policy = { default: "deny", rules: [{ match: "mcp__mail__send(to=*@acme.test*)", action: "allow" }] };
+  // The governed field matches → allow.
+  expect(decideTool(p, "mcp__mail__send", { to: "x@acme.test" }).decision).toBe("allow");
+  // A benign value in ANOTHER field does NOT satisfy the allow (the blob bug is closed).
+  expect(decideTool(p, "mcp__mail__send", { to: "x@evil.com", cc: "ok@acme.test" }).decision).toBe("deny");
+  // Absent / non-string field → no match → deny (fail-safe for allow).
+  expect(decideTool(p, "mcp__mail__send", {}).decision).toBe("deny");
+  expect(decideTool(p, "mcp__mail__send", { to: 42 }).decision).toBe("deny");
+  // Case-insensitive on the field value (email domains).
+  expect(decideTool(p, "mcp__mail__send", { to: "X@ACME.TEST" }).decision).toBe("allow");
+});

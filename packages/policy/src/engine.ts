@@ -1,5 +1,5 @@
 import { globMatch } from "./glob.ts";
-import { BASH_TOOL, PARAMETERIZED } from "./match-form.ts";
+import { BASH_TOOL, PARAMETERIZED, FIELD_SCOPED } from "./match-form.ts";
 import { PolicyError } from "./schema.ts";
 import type { Policy, PolicyAction, ToolEvaluation } from "./types.ts";
 
@@ -48,17 +48,27 @@ function canonicalArgString(args: unknown): string {
 /**
  * Match a policy `match` pattern against a tool call.
  * - Plain form (`read`, `mcp__linear__delete_*`): glob over the tool name.
- * - Parameterized form (`name(<glob>)`): the name part globs the tool name AND
- *   the inner part globs an argument string. For `bash` that is its `command`,
- *   matched case-SENSITIVELY (unchanged). For any OTHER tool it is the canonical
- *   arg string (all string values, recursively), matched case-INSENSITIVELY so
- *   `*DELETE*` also catches `delete`/`Delete` — the fail-safe choice.
+ * - Field-scoped (`name(field=<glob>)`): the glob matches ONLY the named top-level
+ *   argument field (case-insensitively). The sound form for an `allow` — nothing
+ *   in another field can satisfy it. Absent/non-string field → no match.
+ * - Blob form (`name(<glob>)`): the name part globs the tool name AND the inner
+ *   part globs an argument string. For `bash` that is its `command`, matched
+ *   case-SENSITIVELY. For any OTHER tool it is the canonical arg string (all string
+ *   values, recursively), matched case-INSENSITIVELY so `*DELETE*` also catches
+ *   `delete`. Fail-SAFE for deny/ask; fail-OPEN for allow (the loader refuses a
+ *   non-bash blob `allow` — use the field-scoped form instead).
  */
 export function matchToolIdentity(pattern: string, toolName: string, args: unknown): boolean {
   const parameterized = PARAMETERIZED.exec(pattern);
   if (parameterized) {
     const [, toolGlob, innerGlob] = parameterized;
     if (!globMatch(toolGlob.trim(), toolName)) return false;
+    const scoped = FIELD_SCOPED.exec(innerGlob);
+    if (scoped) {
+      const [, fieldName, fieldGlob] = scoped;
+      const v = (args as Record<string, unknown> | null | undefined)?.[fieldName];
+      return typeof v === "string" && globMatch(fieldGlob, v, true);
+    }
     if (toolName === BASH_TOOL) return globMatch(innerGlob, bashCommandString(args));
     return globMatch(innerGlob, canonicalArgString(args), true);
   }
