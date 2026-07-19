@@ -5,8 +5,8 @@
   "type": "module",
   "main": "src/index.ts",
   "dependencies": {
-    "@openharness/definition": "0.0.1",
     "@openharness/bundle": "0.0.1",
-    "esbuild": "0.21.5"
+    "@openharness/definition": "0.0.1",
+    "esbuild": "0.25.12"
   }
 }

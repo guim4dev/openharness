@@ -114,6 +114,14 @@ release tag.
   annotated-tag-object mispin was corrected to the commit), and the workflow runs
   under a least-privilege `contents: read` default token, raising `id-token` /
   `attestations` only in the job that needs them.
+- **Production dependency tree is `npm audit`-clean.** Bumped `@openharness/build`'s
+  `esbuild` 0.21.5 → 0.25.12 (the dev-server-CORS advisory GHSA-67mh-4wv8-2f99 —
+  it's the one prod-tree consumer; `@openharness/build` only ever calls
+  `esbuild.build()`, never `serve()`, so there was no runtime exposure, but a clean
+  `npm audit --omit=dev` is the honest posture). Validated by the four build
+  integration tests + full suite. The remaining advisories are all **dev tooling**
+  (vitest/vite/tsx test+bundle chain) that never ships; a coordinated vitest/vite
+  major bump is the fix, deferred as a breaking dev-dep upgrade.
 
 ### Docs
 
