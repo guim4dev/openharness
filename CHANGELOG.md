@@ -93,6 +93,21 @@ release tag.
   `minVersion` (stricter wins), so both stages check against one source of truth and
   a swapped org-signed bundle in `[baked, floor)` cannot slip past the second stage.
 
+### CI / supply chain
+
+- **The project's own CI now meets the standard it sells.** `ci.yml` went from
+  ubuntu-only / single-Node / never-builds-the-desktop / unpinned actions to: an
+  **OS matrix** (ubuntu + macOS — the launch crash was macOS-specific) × a **Node
+  matrix** (the `.nvmrc` floor + the next LTS major), a **desktop-compile job**
+  (Vite UI build + `cargo build --release` of the Tauri shell on both OSes; a full
+  signed-installer build gated to `main`), and a **supply-chain job** emitting a
+  CycloneDX **SBOM** (`npm sbom`, no third-party action) with **SLSA build
+  provenance** (`actions/attest-build-provenance`). Every action is **pinned to a
+  verified 40-char commit SHA** (each re-checked against its release tag; one
+  annotated-tag-object mispin was corrected to the commit), and the workflow runs
+  under a least-privilege `contents: read` default token, raising `id-token` /
+  `attestations` only in the job that needs them.
+
 ### Docs
 
 - `RUNLOCAL.md` verified end-to-end against `dev` (twice); `SECURITY.md` gains a
