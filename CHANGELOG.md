@@ -99,6 +99,15 @@ release tag.
   Known-limitations section + the gateway's positive invariants; `ROADMAP` and
   `vision` corrected for the shipped OAuth-account path and the built gateway; a
   new **`GATEWAY.md`** deploy/config reference documents every `serve` config key.
+- **Signing-key lifecycle & compromise recovery** — `SECURITY.md` now documents
+  the operations around the signed channel a turnkey PKI would hide: trust-root
+  custody, why rotation is a redistribution event (the root is baked), and the
+  ordered three-step compromise recovery — rotate, redistribute, then **reset the
+  poisoned floor** (the anti-rollback floor is version-only, not key-scoped, so a
+  leaked key that signs version N+50 DoSes the update channel until the floor file
+  is cleared). Pinned by a `trust-root change` invariant test: an old-key bundle
+  never verifies under a new root even at a higher version, and resolution recovers
+  only once the floor is reset. Key-scoped and sealed floors are tracked hardening.
 
 ---
 

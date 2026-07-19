@@ -1,4 +1,4 @@
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -239,6 +239,41 @@ test("resolve: a MISSING or CORRUPT floor file still refuses a rollback below th
   // Corrupt floor file → same: baked wins, rollback refused.
   writeFileSync(floorPath, "corrupted");
   expect(resolvePinnedBundle({ bakedBundlePath: baked, updatesDir, pubkeyPem: KEYS.publicKey, floorPath }).version).toBe("0.5.0");
+});
+
+test("trust-root change (compromise recovery): an old-key bundle never verifies under a new root, and recovery needs the poisoned floor reset", () => {
+  const dir = tmp();
+  const updatesDir = join(dir, "updates");
+  const floorPath = join(dir, "floor.txt");
+  const oldBaked = join(dir, "old-baked.ohbundle");
+  mkdirSync(updatesDir, { recursive: true });
+
+  // Pre-compromise: the app shipped baked-and-signed under the OLD root (KEYS) at 0.1.0.
+  writeBundle(signAtVersion(dir, "0.1.0", KEYS), oldBaked);
+  // Compromise: the STOLEN old key signs a malicious bundle at a very HIGH version, dropped
+  // into the updates dir. It verifies under the old root and, once picked, poisons the floor.
+  writeBundle(signAtVersion(dir, "99.0.0", KEYS), join(updatesDir, "example-99.0.0.ohbundle"));
+  const poisoned = resolvePinnedBundle({ bakedBundlePath: oldBaked, updatesDir, pubkeyPem: KEYS.publicKey, floorPath });
+  expect(poisoned.version).toBe("99.0.0"); // under the OLD root, the malicious high version is "newest"
+  writeFileSync(floorPath, "99.0.0\n"); // the refresh path would have advanced the floor to here
+
+  // Recovery step 2: redistribute under the NEW root (OTHER) with a fresh baked bundle at 1.0.1.
+  const newBaked = join(dir, "new-baked.ohbundle");
+  writeBundle(signAtVersion(dir, "1.0.1", OTHER), newBaked);
+
+  // With the poisoned 99.0.0 floor still present, resolution under the NEW root FAILS CLOSED:
+  // the malicious 99.0.0 doesn't verify (wrong key) and the legit 1.0.1 is below the floor.
+  expect(() =>
+    resolvePinnedBundle({ bakedBundlePath: newBaked, updatesDir, pubkeyPem: OTHER.publicKey, floorPath }),
+  ).toThrow(/no bundle verifies/i);
+
+  // Recovery step 3: reset the poisoned floor file. Now the new-root baked bundle resolves —
+  // and the still-present malicious 99.0.0 (old key) is NOT chosen despite its higher version,
+  // because it never verifies under the new root. Key rotation neutralizes the definition;
+  // the floor reset is what un-DoSes the channel.
+  rmSync(floorPath);
+  const recovered = resolvePinnedBundle({ bakedBundlePath: newBaked, updatesDir, pubkeyPem: OTHER.publicKey, floorPath });
+  expect(recovered.version).toBe("1.0.1");
 });
 
 test("pre-release rollback is refused: 1.0.0-rc.1 does not satisfy a 1.0.0-rc.2 floor", async () => {

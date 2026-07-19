@@ -111,6 +111,51 @@ Said up front rather than left for someone else to discover:
   on this build for defense against a compromised local install; it defends
   against a compromised or rolled-back *definition*.
 
+## Signing-key lifecycle & compromise recovery
+
+The signed-definition channel is only as trustworthy as the operations around the
+key. OpenHarness ships the *mechanism* (ed25519 sign/verify, a persisted
+monotonic anti-rollback floor); the *custody and recovery* below are the
+deployer's, said explicitly so a signed channel isn't mistaken for a turnkey PKI.
+
+- **Trust root.** The org's ed25519 **public** key is the root. In a sealed
+  release it is **baked into the app binary** (the launcher pins it as a resource),
+  so establishing trust at first install reduces to the security of app
+  distribution — there is no separate CA/PKI to stand up, and no in-band key
+  enrollment. The matching **private** key is the org's to hold: `openharness
+  keygen` is for dev; production should sign behind a custody boundary (HSM, cloud
+  KMS signer, or an offline air-gapped key) that never exports the private key.
+- **Rotation is redistribution, by design.** There is **no in-band key rotation**.
+  Because the root is baked, rotating it means shipping a new app build with the
+  new baked public key (a coordinated update/reinstall). A single static root is
+  simpler to reason about than a rotation protocol; the cost is that rotation is a
+  redistribution event. New-key bundles do not verify under an old install, and
+  old-key bundles do not verify under a new one.
+- **Compromise recovery is an ordered, three-step operation.** If the private key
+  leaks, an attacker who can also reach the update channel can sign a bundle at an
+  arbitrarily **high** version, advancing the persisted floor to it. Recover in
+  this order:
+  1. **Rotate** the key pair under the custody boundary; retire the old public key.
+  2. **Redistribute** the app with the new baked public key and a fresh baked
+     bundle. The malicious old-key bundle **stops verifying immediately** — key
+     rotation neutralizes the poisoned *definition* itself, independent of its
+     version number.
+  3. **Reset the floor file** (`<configDir>/version-floor.txt`, or `OH_FLOOR_PATH`).
+     The floor is monotonic and **version-only, not key-scoped**, so a poisoned
+     high floor survives the key change. The app still **boots** (the baked bundle
+     is the fallback anchor), but the update channel would refuse every legitimate
+     post-recovery update below the poisoned version until the file is cleared;
+     deleting it resets the floor to the new baked bundle's version.
+
+  This is pinned by the `trust-root change` invariant test in
+  `packages/core/src/update.test.ts`: an old-key bundle never verifies under the
+  new root even at a higher version, and resolution recovers only once the poisoned
+  floor file is reset.
+- **Tracked hardening.** A **key-scoped floor** — persisting `(rootKeyId, version)`
+  so a trust-root change auto-resets the floor and drops step 3 — and a
+  sealed/keychain-backed floor (so a same-dir writer can't set it at all) are
+  follow-ups, not shipped.
+
 ## Known limitations (accepted, tracked)
 
 Surfaced by adversarial review and accepted for now — each is a bounded gap, not
