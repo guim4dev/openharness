@@ -6,7 +6,7 @@ All notable changes to OpenHarness. This project adheres to
 
 ## [Unreleased]
 
-Work on the `dev` branch since `v0.1.0` (548 tests green). Not yet promoted to a
+Work on the `dev` branch since `v0.1.0` (641 tests green). Not yet promoted to a
 release tag.
 
 ### Added
@@ -16,6 +16,13 @@ release tag.
   rotation **pool**, and an **out-of-process connector sandbox** (a warm
   per-(principal, connector) worker) are now selectable from the gateway config
   file, each a provider-agnostic interface + offline reference impl.
+- **JWKS IdP verifier** — `tokenExchange` is config-selectable between the static
+  single-key (Ed25519) verifier and a **JWKS-fetching** one (`jwksUri`, RS256/ES256
+  selected by `kid`, https-only, capped-TTL cache, Node crypto — no new dep), so
+  the token-exchange works against real OIDC IdPs (Okta/Entra/Auth0/Google).
+- **CLI dual-control** — `openharness-gateway serve` reads per-approver tokens from
+  `OPENHARNESS_GATEWAY_APPROVERS` (a JSON identity→token map), so
+  `requireSecondPerson` is usable without embedding `startGatewayFromConfig`.
 - **Signed-definition update channel** — `openharness update` pulls a newer signed
   bundle from a server, verifies it under the org pubkey against a persisted,
   monotonic anti-rollback **floor**, and writes an accepted newer bundle to the
@@ -40,12 +47,27 @@ release tag.
 - **Desktop launch crash fixed** — resolve `Contents/Resources` from
   `current_exe()` (tolerating a symlinked exe-path ancestor) and probe for `node`
   under launchd's bare PATH, so the packaged app boots from any launch context.
+- **Three adversarial correctness sweeps** over the code the trust-boundary
+  reviews didn't cover found + fixed **36 of 37** confirmed bugs (each with a
+  regression test), including six HIGH the passing suite missed: a symlink bypass
+  of the loader's file-exfiltration guard (`resolve()` → `realpath()`), a
+  materialize atomicity/fail-closed violation, a session `close()` that leaked
+  every resource if one teardown step threw, a builder MCP round-trip that dropped
+  env/secrets/args/headers, a `SecretStore.open()` that regenerated the key (and
+  destroyed every secret) on any non-ENOENT read error, and a JWKS verifier with
+  no forgery/fail-open bypass after 43+ PoC attacks. Plus MCP result caps, a
+  gateway tool-name guard, redaction of secret object-keys, an atomic secret-store
+  flush, a `/bundle` version guard, socket-drop turn termination, and builder
+  round-trip/verdict/reselect fixes. The one deferred finding — an
+  argument-content `allow` that is fail-open for non-`bash` tools — is documented
+  in `SECURITY.md` (safe fix: field-scoped matching).
 
 ### Docs
 
-- `RUNLOCAL.md` verified end-to-end against `dev`; `SECURITY.md` gains a
+- `RUNLOCAL.md` verified end-to-end against `dev` (twice); `SECURITY.md` gains a
   Known-limitations section + the gateway's positive invariants; `ROADMAP` and
-  `vision` corrected for the shipped OAuth-account path and the built gateway.
+  `vision` corrected for the shipped OAuth-account path and the built gateway; a
+  new **`GATEWAY.md`** deploy/config reference documents every `serve` config key.
 
 ---
 
