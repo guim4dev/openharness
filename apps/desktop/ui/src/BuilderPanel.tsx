@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { draftFromManifest, draftToSkillContents, useBuilder, type PolicyAction } from "./builder.ts";
 import type { LoadedDefinition, SaveResult } from "./chat.ts";
 
@@ -44,6 +44,17 @@ export function BuilderPanel({
   loadedDefinition,
 }: BuilderPanelProps) {
   const b = useBuilder();
+
+  // A save/verify verdict is only valid for the draft it was computed on. Snapshot
+  // the draft when a verdict arrives; once the draft changes, the verdict is stale
+  // and must not keep implying an edited/unsaved draft is "doctor OK".
+  const [savedSnapshot, setSavedSnapshot] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (saveResult !== undefined) setSavedSnapshot(JSON.stringify(b.draft));
+    // Keyed on saveResult only — we deliberately capture the draft AS SAVED.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saveResult]);
+  const verdictFresh = saveResult !== undefined && savedSnapshot === JSON.stringify(b.draft);
 
   // Ask for the saved-definition list once, when a load affordance is wired.
   useEffect(() => {
@@ -331,7 +342,7 @@ export function BuilderPanel({
               >
                 {canSave ? "Save & verify" : "Connecting…"}
               </button>
-              {saveResult ? (
+              {saveResult && verdictFresh ? (
                 <p
                   className={`builder-save-result builder-save-result-${saveResult.error ? "bad" : saveResult.ok ? "ok" : "warn"}`}
                   role="status"

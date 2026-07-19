@@ -175,3 +175,13 @@ test("a loadedDefinition is folded into the draft (round-trip preserves the gate
   expect(manifest.textContent).toContain('"pubkey": "PINNED"');
   expect(manifest.textContent).toContain('"version": "2.0.0"');
 });
+
+test("a save/verify verdict is cleared once the draft is edited (no stale 'doctor OK')", () => {
+  render(<BuilderPanel onSave={() => {}} saveResult={{ ok: true, dir: "/cfg/acme", problems: [] }} />);
+  // The verdict is shown for the draft it was computed on.
+  expect(screen.getByText(/doctor OK/)).toBeTruthy();
+  // Editing any field must invalidate it — a green verdict must never imply an
+  // edited, unsaved draft is already verified.
+  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "changed-name" } });
+  expect(screen.queryByText(/doctor OK/)).toBeNull();
+});
