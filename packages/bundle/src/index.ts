@@ -178,12 +178,38 @@ function readBundle(path: string): Bundle {
 // Bundle / verify / extract
 // ---------------------------------------------------------------------------
 
+export interface BundleBuildOptions {
+  /**
+   * The manifest `createdAt` timestamp. Pin it for a BYTE-REPRODUCIBLE bundle:
+   * every file is content-addressed (sha256) and the ed25519 signature is
+   * deterministic (RFC 8032), so `createdAt` is the ONLY non-reproducible field.
+   * Precedence: this option, then the `SOURCE_DATE_EPOCH` env convention (Unix
+   * seconds — the reproducible-builds standard), then the wall clock. Two builds
+   * of the same definition with the same `createdAt` produce identical bytes and
+   * an identical signature, so a distributed bundle can be cross-verified against
+   * its source. Must be a valid ISO-8601 string.
+   */
+  createdAt?: string;
+}
+
+/** Resolve the manifest timestamp: explicit > SOURCE_DATE_EPOCH > wall clock. */
+function resolveCreatedAt(opts?: BundleBuildOptions): string {
+  if (opts?.createdAt) return opts.createdAt;
+  const sde = process.env.SOURCE_DATE_EPOCH?.trim();
+  if (sde && /^\d+$/.test(sde)) {
+    const ms = Number(sde) * 1000;
+    if (Number.isFinite(ms)) return new Date(ms).toISOString();
+  }
+  return new Date().toISOString();
+}
+
 /**
  * Build a signed bundle from a definition directory. Walks every file under
  * `defDir`, records each one's sha256 + base64 content, reads name/version from
  * harness.json, and signs the canonical JSON of the manifest with `privateKeyPem`.
+ * Pass `opts.createdAt` (or set `SOURCE_DATE_EPOCH`) for a byte-reproducible build.
  */
-export function bundleDefinition(defDir: string, privateKeyPem: string): Bundle {
+export function bundleDefinition(defDir: string, privateKeyPem: string, opts?: BundleBuildOptions): Bundle {
   const root = resolve(defDir);
   const harnessJsonPath = join(root, "harness.json");
   if (!existsSync(harnessJsonPath))
@@ -207,7 +233,7 @@ export function bundleDefinition(defDir: string, privateKeyPem: string): Bundle 
   const manifest: BundleManifest = {
     name: meta.name,
     version: meta.version,
-    createdAt: new Date().toISOString(),
+    createdAt: resolveCreatedAt(opts),
     files,
   };
 

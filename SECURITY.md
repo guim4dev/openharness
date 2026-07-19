@@ -63,7 +63,14 @@ them breaks, that's a security bug regardless of how it's triggered:
   anything unsigned, tampered, or signed by the wrong key. An optional
   `minVersion` floor baked into a branded build refuses a validly-signed but
   *older* bundle, so a captured old build can't be replayed to roll back a
-  security fix.
+  security fix. **Bundles are byte-reproducible**: every file is content-addressed
+  (sha256) and the ed25519 signature is deterministic (RFC 8032), so with the
+  manifest `createdAt` pinned — pass it to `bundleDefinition` or set the
+  `SOURCE_DATE_EPOCH` reproducible-builds env var — two independent builds of the
+  same definition produce identical bytes and an identical signature. A recipient
+  can therefore cross-verify that a distributed bundle matches its published
+  source, not merely that *some* org key signed it. (Left unpinned, `createdAt` is
+  the wall clock — the only non-reproducible field.)
 - **Credentials are provider-scoped.** Multi-account rotation/failover
   (`CredentialManager`) only ever selects an account whose `provider` matches
   the caller's — a harness talking to one vendor can never be handed another

@@ -85,6 +85,13 @@ release tag.
   3000-level nesting → no fail-open in the hook), and the blob deny/ask surface
   stays fail-safe. A "teeth" test proves the smuggled value is reachable and that
   field-scoping is what refuses it.
+- **Byte-reproducible signed bundles.** `bundleDefinition` now honors an explicit
+  `createdAt` option and the `SOURCE_DATE_EPOCH` reproducible-builds env var; with
+  the timestamp pinned, two independent builds of the same definition produce
+  identical bytes and an identical signature (files are content-addressed, ed25519
+  is deterministic — `createdAt` was the sole non-reproducible field). A recipient
+  can cross-verify a distributed bundle against its published source, not just that
+  some org key signed it. Default (unpinned) behavior is unchanged.
 - **Anti-rollback floor unified across both enforcement stages.** The desktop boot
   verified the bundle twice — stage 1 (`resolvePinnedBundle`) picked the newest
   bundle ≥ the *effective* floor `max(persisted, baked)`, but stage 2 (the sidecar)

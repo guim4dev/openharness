@@ -182,3 +182,38 @@ test("extractBundle rejects path-traversal entries", () => {
   };
   expect(() => extractBundle(evil, dest)).toThrow(BundleVerificationError);
 });
+
+test("reproducible build: same definition + pinned createdAt -> byte-identical bundle & signature", () => {
+  const { publicKey, privateKey } = generateKeypair();
+  const createdAt = "2020-01-02T03:04:05.000Z";
+  const a = bundleDefinition(exampleDir, privateKey, { createdAt });
+  const b = bundleDefinition(exampleDir, privateKey, { createdAt });
+  // With every file content-addressed and ed25519 deterministic, pinning createdAt
+  // makes two independent builds byte-for-byte identical — a distributed bundle can
+  // be cross-verified against its source.
+  expect(a.manifest.createdAt).toBe(createdAt);
+  expect(a.signature).toBe(b.signature);
+  expect(JSON.stringify(a, null, 2)).toBe(JSON.stringify(b, null, 2));
+  expect(verifyBundle(a, publicKey).manifest.version).toBe("0.1.0");
+});
+
+test("SOURCE_DATE_EPOCH pins createdAt (reproducible-builds convention); an explicit option still wins", () => {
+  const { privateKey } = generateKeypair();
+  const prev = process.env.SOURCE_DATE_EPOCH;
+  try {
+    process.env.SOURCE_DATE_EPOCH = "1600000000"; // 2020-09-13T12:26:40.000Z
+    const a = bundleDefinition(exampleDir, privateKey);
+    const b = bundleDefinition(exampleDir, privateKey);
+    expect(a.manifest.createdAt).toBe(new Date(1_600_000_000 * 1000).toISOString());
+    expect(a.signature).toBe(b.signature); // reproducible with no explicit option
+    // An explicit createdAt overrides the env.
+    const c = bundleDefinition(exampleDir, privateKey, { createdAt: "2020-01-01T00:00:00.000Z" });
+    expect(c.manifest.createdAt).toBe("2020-01-01T00:00:00.000Z");
+    // A malformed SOURCE_DATE_EPOCH is ignored (falls through to the wall clock), never throws.
+    process.env.SOURCE_DATE_EPOCH = "not-a-number";
+    expect(() => bundleDefinition(exampleDir, privateKey)).not.toThrow();
+  } finally {
+    if (prev === undefined) delete process.env.SOURCE_DATE_EPOCH;
+    else process.env.SOURCE_DATE_EPOCH = prev;
+  }
+});
