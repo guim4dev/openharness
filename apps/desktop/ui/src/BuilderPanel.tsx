@@ -96,7 +96,10 @@ export function BuilderPanel({
               <span className="builder-load-label">Open</span>
               <select
                 aria-label="Open a saved definition"
-                defaultValue=""
+                // Controlled to "" so it always resets to the placeholder after a
+                // pick — otherwise it stays on the chosen name and re-selecting the
+                // SAME definition fires no change event (you couldn't reload it).
+                value=""
                 onChange={(e) => {
                   if (e.target.value) onLoadDefinition(e.target.value);
                 }}
