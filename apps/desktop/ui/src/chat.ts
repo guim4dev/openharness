@@ -141,7 +141,10 @@ export type ChatAction =
   | { type: "send"; text: string }
   | { type: "server"; event: ServerMessage }
   /** The user answered the pending ask; clear the modal (the answer goes over the WS). */
-  | { type: "answer_ask"; id: string };
+  | { type: "answer_ask"; id: string }
+  /** The builder folded the loaded definition into its draft — consume it (one-shot)
+   *  so remounting the builder for a NEW harness starts blank, not with the stale def. */
+  | { type: "clear_loaded_definition" };
 
 export const initialChatState: ChatState = {
   messages: [],
@@ -349,6 +352,8 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       if (!head || head.id !== action.id) return state;
       return { ...state, pendingAsks: state.pendingAsks.slice(1) };
     }
+    case "clear_loaded_definition":
+      return state.loadedDefinition === undefined ? state : { ...state, loadedDefinition: undefined };
   }
 }
 
@@ -395,6 +400,8 @@ export interface UseChat {
   listDefinitions: () => void;
   /** Load a saved definition back into the builder (populates `loadedDefinition`). */
   loadDefinition: (name: string) => void;
+  /** Consume `loadedDefinition` (one-shot) once the builder has folded it in. */
+  clearLoadedDefinition: () => void;
   availableDefinitions?: string[];
   loadedDefinition?: LoadedDefinition;
 }
@@ -504,6 +511,10 @@ export function useChat(connection: Connection | null): UseChat {
     socket.send(JSON.stringify({ type: "load_definition", name }));
   }, []);
 
+  // The builder calls this once it has folded a loaded definition into its draft,
+  // so it isn't re-applied on a later remount (a fresh "build a harness" is blank).
+  const clearLoadedDefinition = useCallback(() => dispatch({ type: "clear_loaded_definition" }), []);
+
   const answerAsk = useCallback((id: string, approved: boolean) => {
     // No-op if `id` is not the currently-surfaced ask (stale, already settled,
     // or cancelled by the server): never dequeue or answer the wrong ask.
@@ -528,6 +539,7 @@ export function useChat(connection: Connection | null): UseChat {
     saveDefinition,
     listDefinitions,
     loadDefinition,
+    clearLoadedDefinition,
     ...(state.integrityMessage !== undefined ? { integrityMessage: state.integrityMessage } : {}),
     ...(head !== undefined ? { pendingAsk: head } : {}),
     ...(state.setup !== undefined ? { setup: state.setup } : {}),

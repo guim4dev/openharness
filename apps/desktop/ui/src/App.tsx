@@ -282,6 +282,7 @@ export function App() {
     saveResult,
     listDefinitions,
     loadDefinition,
+    clearLoadedDefinition,
     availableDefinitions,
     loadedDefinition,
   } = useChat(connection);
@@ -313,6 +314,7 @@ export function App() {
         canSave={connected}
         onListDefinitions={listDefinitions}
         onLoadDefinition={loadDefinition}
+        onLoadedApplied={clearLoadedDefinition}
         {...(saveResult !== undefined ? { saveResult } : {})}
         {...(availableDefinitions !== undefined ? { availableDefinitions } : {})}
         {...(loadedDefinition !== undefined ? { loadedDefinition } : {})}

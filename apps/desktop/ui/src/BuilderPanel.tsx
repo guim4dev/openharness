@@ -31,6 +31,9 @@ export interface BuilderPanelProps {
   availableDefinitions?: string[];
   /** A definition loaded for editing — folded into the draft when it arrives. */
   loadedDefinition?: LoadedDefinition;
+  /** Called once the loaded definition has been folded into the draft, so the
+   *  parent can clear it (one-shot) and a later remount starts with a blank draft. */
+  onLoadedApplied?: () => void;
 }
 
 export function BuilderPanel({
@@ -42,6 +45,7 @@ export function BuilderPanel({
   onLoadDefinition,
   availableDefinitions,
   loadedDefinition,
+  onLoadedApplied,
 }: BuilderPanelProps) {
   const b = useBuilder();
 
@@ -76,8 +80,11 @@ export function BuilderPanel({
           loadedDefinition.skills,
         ),
       );
+      // Consume it (one-shot): if we don't, a remount (back to chat, then "build a
+      // harness again") re-applies this now-stale definition over the fresh draft.
+      onLoadedApplied?.();
     }
-  }, [loadedDefinition, b]);
+  }, [loadedDefinition, b, onLoadedApplied]);
 
   return (
     <div className="builder" role="region" aria-label="Harness builder">
