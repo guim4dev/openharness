@@ -6,8 +6,22 @@ All notable changes to OpenHarness. This project adheres to
 
 ## [Unreleased]
 
-Work on the `dev` branch since `v0.1.0` (641 tests green). Not yet promoted to a
+Work on the `dev` branch since `v0.1.0` (643 tests green). Not yet promoted to a
 release tag.
+
+### Changed (BREAKING)
+
+- **A `policy.json` with an argument-content `allow` on a non-`bash` tool now
+  fails to load.** The form `tool(<glob>)` matched a blob of ALL argument fields;
+  as an `allow` that was fail-open (a disallowed value could be smuggled into
+  another field). Migrate such a rule to the new **field-scoped** form
+  `tool(<field>=<glob>)` (pins the governed field), or to `deny`/`ask` (the blob
+  form is unchanged and safe for those). `bash(<glob>)` allows are unaffected.
+  All OTHER v0.1.0 artifacts are format-compatible and need no migration: signed
+  `.ohbundle`s still verify (the sign/verify format is unchanged; only the
+  anti-rollback comparator gained SemVer pre-release ordering), audit chains still
+  verify, the encrypted secret store loads unchanged, and a v0.1.0 `accounts.json`
+  migrates as before (the api-key path is byte-for-byte unchanged).
 
 ### Added
 
