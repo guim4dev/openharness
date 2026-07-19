@@ -212,6 +212,12 @@ test("SOURCE_DATE_EPOCH pins createdAt (reproducible-builds convention); an expl
     // A malformed SOURCE_DATE_EPOCH is ignored (falls through to the wall clock), never throws.
     process.env.SOURCE_DATE_EPOCH = "not-a-number";
     expect(() => bundleDefinition(exampleDir, privateKey)).not.toThrow();
+    // An all-digits value BEYOND the valid Date range must also fall through, not throw
+    // (Number.isFinite passes for 1e23; only the range guard stops the RangeError).
+    process.env.SOURCE_DATE_EPOCH = "99999999999999999999";
+    const huge = bundleDefinition(exampleDir, privateKey);
+    expect(huge.manifest.createdAt).not.toBe(new Date(1_600_000_000 * 1000).toISOString());
+    expect(() => new Date(huge.manifest.createdAt).toISOString()).not.toThrow(); // a valid wall-clock ISO
   } finally {
     if (prev === undefined) delete process.env.SOURCE_DATE_EPOCH;
     else process.env.SOURCE_DATE_EPOCH = prev;

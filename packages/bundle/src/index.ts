@@ -198,7 +198,11 @@ function resolveCreatedAt(opts?: BundleBuildOptions): string {
   const sde = process.env.SOURCE_DATE_EPOCH?.trim();
   if (sde && /^\d+$/.test(sde)) {
     const ms = Number(sde) * 1000;
-    if (Number.isFinite(ms)) return new Date(ms).toISOString();
+    // `Number.isFinite` alone is not enough: 1e23 is finite but outside the valid
+    // ECMAScript Date range (±8.64e15 ms), so `new Date(ms).toISOString()` would
+    // THROW. Guard the range so a huge/typo'd SOURCE_DATE_EPOCH falls through to
+    // the wall clock (the documented "malformed is ignored, never throws").
+    if (Number.isFinite(ms) && Math.abs(ms) <= 8.64e15) return new Date(ms).toISOString();
   }
   return new Date().toISOString();
 }
